@@ -55,7 +55,7 @@ export default function Home() {
     setActiveId(course.id);
     setTab("home");
     setDrawingOpen(false);
-    showToast("코스가 저장됐어요");
+    showToast(course.visibility === "public" ? "코스가 저장됐어요 🌍" : "나만의 코스로 저장됐어요 🔒");
   };
 
   const pickCourse = (id: string) => { setActiveId(id); setTab("home"); setSnap("peek"); };

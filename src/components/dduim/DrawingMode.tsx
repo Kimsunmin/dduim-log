@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Course, LatLngLiteral } from "@/lib/dduim/types";
+import type { Course, CourseVisibility, LatLngLiteral } from "@/lib/dduim/types";
 import { PACE_PRESETS, TAG_CATALOG } from "@/lib/dduim/data";
 import { calcGeoDistance, createCourseId, deriveNormalizedPath, generateReturnPath, smoothedPath } from "@/lib/dduim/utils";
 import { IconClock } from "./icons";
@@ -24,6 +24,7 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   const [stage, setStage] = useState<"draw" | "details">("draw");
   const [title, setTitle] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [visibility, setVisibility] = useState<CourseVisibility>("private");
   const [mapReady, setMapReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const [returnPointIdx, setReturnPointIdx] = useState<number | null>(null);
@@ -227,6 +228,7 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
       startPoint: geoPoints[0],
       tags: tagObjs.length ? tagObjs : [{ text: "내코스", emoji: "🎒", color: "mint" }],
       mine: true,
+      visibility,
     });
   };
 
@@ -436,6 +438,31 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
                           fontSize: 12.5, fontWeight: 600, lineHeight: 1.5 }}>
               🍀 로그인 없이 내 브라우저에 저장돼요. 나중에 공유 링크로 친구들한테 보낼 수 있어요.
             </div>
+
+            <div style={{ marginTop: 18 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)", display: "block", marginBottom: 8 }}>
+                공개 설정
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {(["private", "public"] as CourseVisibility[]).map(v => {
+                  const isActive = visibility === v;
+                  const label = v === "private" ? "🔒 나만보기" : "🌍 공유하기";
+                  return (
+                    <button key={v} onClick={() => setVisibility(v)} style={{
+                      flex: 1, height: 44, borderRadius: 14, cursor: "pointer",
+                      background: isActive ? "var(--mint-deep)" : "var(--bg-card)",
+                      border: isActive ? "1.5px solid var(--mint-deep)" : "1px solid var(--border-warm)",
+                      color: isActive ? "#fff" : "var(--text-2)",
+                      fontWeight: 700, fontSize: 13.5, fontFamily: "inherit",
+                      transition: "all 0.15s ease",
+                    }}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
 
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 0,
@@ -452,7 +479,7 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
               color: "#fff", border: "none", cursor: "pointer",
               fontWeight: 800, fontSize: 15, fontFamily: "inherit", letterSpacing: "-0.01em",
               boxShadow: "0 6px 16px -6px rgba(47, 139, 110, 0.5)",
-            }}>저장하고 공유하기</button>
+            }}>{visibility === "private" ? "나만의 코스로 저장" : "저장하고 공유하기"}</button>
           </div>
         </>
       )}
