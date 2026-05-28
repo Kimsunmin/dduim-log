@@ -1,0 +1,51 @@
+import type { Course } from "@/lib/dduim/types";
+import { MiniMap } from "./MiniMap";
+import { SmileFavorite } from "./icons";
+
+export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave }: {
+  course: Course; isActive: boolean; isSaved: boolean;
+  onClick: () => void; onToggleSave: (id: string) => void;
+}) {
+  return (
+    <article className={`course-card ${isActive ? "is-active" : ""}`} onClick={onClick}>
+      <div className="thumb">
+        <MiniMap path={course.path} color={course.color}/>
+      </div>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 5 }}>
+              {course.tags.slice(0, 2).map(tag => (
+                <span key={tag.text} className={`chip-tag ${tag.color}`}>
+                  <span>#{tag.text}</span>
+                  <span style={{ fontSize: 10 }}>{tag.emoji}</span>
+                </span>
+              ))}
+            </div>
+            <h3 style={{ margin: 0, color: "var(--text-1)", fontSize: 15.5, fontWeight: 700,
+                         letterSpacing: "-0.015em", lineHeight: 1.3, overflow: "hidden",
+                         textOverflow: "ellipsis", display: "-webkit-box",
+                         WebkitLineClamp: 1, WebkitBoxOrient: "vertical" }}>
+              {course.title}
+            </h3>
+          </div>
+          <button className={`smile ${isSaved ? "is-on" : ""}`}
+            onClick={e => { e.stopPropagation(); onToggleSave(course.id); }}
+            aria-label={isSaved ? "즐겨찾기 해제" : "즐겨찾기 추가"}>
+            <SmileFavorite on={isSaved}/>
+          </button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-3)" }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-1)", letterSpacing: "-0.02em" }}>
+            {course.distance.toFixed(1)}
+            <span style={{ fontSize: 10.5, color: "var(--text-3)", marginLeft: 1, fontWeight: 700 }}>km</span>
+          </span>
+          <span className="dot-divider"/>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)" }}>{course.minutes}분</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+// ─── MapView (SVG background) ─────────────────────────────────────────────────
