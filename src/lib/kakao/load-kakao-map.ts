@@ -52,7 +52,9 @@ type KakaoMapsNamespace = {
 export type KakaoMap = {
   panTo(position: KakaoLatLng): void;
   setCenter(position: KakaoLatLng): void;
+  getCenter(): KakaoLatLng;
   setLevel(level: number): void;
+  getLevel(): number;
   relayout(): void;
 };
 

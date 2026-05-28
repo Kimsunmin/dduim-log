@@ -28,9 +28,40 @@ export function KakaoMapView({ courses, activeId, favoriteIds, onPick, panToLatL
   const overlayRefs = useRef<KakaoCustomOverlay[]>([]);
   const polylineRef = useRef<KakaoPolyline | null>(null);
   const kmMarkersRef = useRef<KakaoCustomOverlay[]>([]);
+  const locationOverlayRef = useRef<KakaoCustomOverlay | null>(null);
   const onCenterChangeRef = useRef(onCenterChange);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [geoState, setGeoState] = useState<"idle" | "locating" | "denied">("idle");
+
+  const handleMyLocation = () => {
+    if (!navigator.geolocation || !mapRef.current) return;
+    setGeoState("locating");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        loadKakaoMap().then((maps) => {
+          if (!mapRef.current) return;
+          locationOverlayRef.current?.setMap(null);
+          locationOverlayRef.current = new maps.CustomOverlay({
+            content: createMyLocationElement(),
+            map: mapRef.current,
+            position: new maps.LatLng(lat, lng),
+            xAnchor: 0.5,
+            yAnchor: 0.5,
+            zIndex: 50,
+          });
+          mapRef.current.setLevel(4);
+          mapRef.current.panTo(new maps.LatLng(lat, lng));
+          setGeoState("idle");
+        });
+      },
+      (err) => {
+        setGeoState(err.code === err.PERMISSION_DENIED ? "denied" : "idle");
+      },
+      { enableHighAccuracy: true, timeout: 8000 },
+    );
+  };
 
   const geoCourses = useMemo(
     () => courses.filter((course) => course.startPoint && course.geoPath?.length),
@@ -74,6 +105,8 @@ export function KakaoMapView({ courses, activeId, favoriteIds, onPick, panToLatL
       polylineRef.current = null;
       kmMarkersRef.current.forEach((m) => m.setMap(null));
       kmMarkersRef.current = [];
+      locationOverlayRef.current?.setMap(null);
+      locationOverlayRef.current = null;
     };
   }, []);
 
@@ -189,6 +222,43 @@ export function KakaoMapView({ courses, activeId, favoriteIds, onPick, panToLatL
           <span>지도를 불러오는 중</span>
         </div>
       )}
+      {ready && (
+        <button
+          onClick={handleMyLocation}
+          disabled={geoState === "locating"}
+          title={geoState === "denied" ? "위치 권한이 없어요. 브라우저 설정에서 허용해 주세요." : "내 위치"}
+          aria-label="내 위치"
+          style={{
+            position: "absolute", bottom: 164, right: 28,
+            width: 40, height: 40, borderRadius: 12,
+            border: "1px solid rgba(0,0,0,0.08)",
+            background: "white",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: geoState === "locating" ? "wait" : "pointer",
+            color: geoState === "denied" ? "#bbb" : "#4285F4",
+            zIndex: 10, flexShrink: 0,
+          }}
+        >
+          {geoState === "locating" ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+              style={{ animation: "spin 1s linear infinite" }}>
+              <path d="M12 2a10 10 0 0 1 10 10"/>
+            </svg>
+          ) : geoState === "denied" ? (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+              <line x1="3" y1="3" x2="21" y2="21"/>
+            </svg>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+            </svg>
+          )}
+        </button>
+      )}
     </div>
   );
 }
@@ -261,4 +331,19 @@ function createCourseOverlayElement(course: Course, isActive: boolean, isFav: bo
   }
 
   return button;
+}
+
+function createMyLocationElement(): HTMLElement {
+  const outer = document.createElement("div");
+  outer.style.cssText = "position:relative;width:20px;height:20px;";
+
+  const ring = document.createElement("div");
+  ring.style.cssText = "position:absolute;inset:-8px;border-radius:50%;background:rgba(66,133,244,0.18);pointer-events:none;";
+
+  const dot = document.createElement("div");
+  dot.style.cssText = "width:20px;height:20px;border-radius:50%;background:#4285F4;border:3px solid white;box-shadow:0 1px 6px rgba(0,0,0,0.3);";
+
+  outer.appendChild(ring);
+  outer.appendChild(dot);
+  return outer;
 }

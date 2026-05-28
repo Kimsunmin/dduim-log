@@ -11,7 +11,7 @@ import {
 } from "@/lib/kakao/load-kakao-map";
 import { reverseGeocode } from "@/lib/kakao/reverse-geocode";
 
-const DEFAULT_CENTER = { lat: 37.52693, lng: 126.93447 };
+const DEFAULT_CENTER = { lat: 37.52693, lng: 126.93447, level: 5 };
 
 export function DrawingMode({ onExit, onSave, initialCenter }: {
   onExit: () => void;
