@@ -1,3 +1,5 @@
+import type { LatLngLiteral } from "./types";
+
 export function readJson<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) || "") as T; }
   catch { return fallback; }
@@ -27,6 +29,29 @@ export function calcDistance(points: Array<{ x: number; y: number }>, aspect = 1
     total += Math.sqrt(dx * dx + dy * dy);
   }
   return total / 1000;
+}
+
+export function calcGeoDistance(points: LatLngLiteral[]): number {
+  if (points.length < 2) return 0;
+
+  const radiusKm = 6371;
+  const toRad = (value: number) => value * Math.PI / 180;
+  let total = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const next = points[i];
+    const dLat = toRad(next.lat - prev.lat);
+    const dLng = toRad(next.lng - prev.lng);
+    const lat1 = toRad(prev.lat);
+    const lat2 = toRad(next.lat);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    total += 2 * radiusKm * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  return total;
 }
 
 export function createCourseId(title: string, points: Array<{ x: number; y: number }>, distance: number): string {

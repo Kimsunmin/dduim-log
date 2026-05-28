@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Course, SnapPosition } from "@/lib/dduim/types";
-import { AREAS, baseCourses, COLOR_BG, COLOR_INK, FAVORITE_KEY, FILTER_OPTIONS, MINE_KEY, navItems, POSTS } from "@/lib/dduim/data";
+import { AREAS, baseCourses, COLOR_BG, COLOR_INK, FILTER_OPTIONS, navItems, POSTS } from "@/lib/dduim/data";
 import type { TabId } from "@/lib/dduim/data";
-import { readJson } from "@/lib/dduim/utils";
+import { useDduimStore } from "@/lib/dduim/store";
 import { BottomSheet } from "@/components/dduim/BottomSheet";
 import { CourseCard } from "@/components/dduim/CourseCard";
 import { DrawingMode } from "@/components/dduim/DrawingMode";
@@ -18,13 +18,13 @@ export default function Home() {
   const [activeId, setActiveId] = useState(baseCourses[0].id);
   const [filter, setFilter] = useState("전체");
   const [snap, setSnap] = useState<SnapPosition>("mid");
-  const [favorites, setFavorites] = useState<string[]>(() => readJson<string[]>(FAVORITE_KEY, []));
-  const [myCourses, setMyCourses] = useState<Course[]>(() => readJson<Course[]>(MINE_KEY, []));
   const [drawingOpen, setDrawingOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const { userCourses, savedCourseIds, likedPostIds, actions } = useDduimStore();
 
-  const courses = useMemo(() => [...myCourses, ...baseCourses], [myCourses]);
-  const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
+  const courses = useMemo(() => [...userCourses, ...baseCourses], [userCourses]);
+  const favoriteSet = useMemo(() => new Set(savedCourseIds), [savedCourseIds]);
+  const likedPostSet = useMemo(() => new Set(likedPostIds), [likedPostIds]);
   const visibleCourses = useMemo(() => {
     if (filter === "전체") return courses;
     return courses.filter(c => c.tags.some(t => t.text === filter));
@@ -40,24 +40,16 @@ export default function Home() {
   };
 
   const toggleFavorite = (id: string) => {
-    setFavorites(prev => {
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
-      localStorage.setItem(FAVORITE_KEY, JSON.stringify(next));
-      showToast(next.includes(id) ? "즐겨찾기에 저장했어요" : "즐겨찾기에서 뺐어요");
-      return next;
-    });
+    const isSaved = actions.toggleSavedCourse(id);
+    showToast(isSaved ? "즐겨찾기에 저장했어요" : "즐겨찾기에서 뺐어요");
   };
 
   const saveMine = (course: Course) => {
-    setMyCourses(prev => {
-      const next = [course, ...prev];
-      localStorage.setItem(MINE_KEY, JSON.stringify(next));
-      return next;
-    });
+    actions.saveUserCourse(course);
     setActiveId(course.id);
     setTab("home");
     setDrawingOpen(false);
-    showToast("코스가 저장됐어요 🎒");
+    showToast("코스가 저장됐어요");
   };
 
   const pickCourse = (id: string) => { setActiveId(id); setTab("home"); setSnap("peek"); };
@@ -75,7 +67,13 @@ export default function Home() {
           />
         )}
         {tab === "feed" && (
-          <FeedView courses={courses} favoriteSet={favoriteSet} toggleFavorite={toggleFavorite}/>
+          <FeedView
+            courses={courses}
+            favoriteSet={favoriteSet}
+            likedPostIds={likedPostSet}
+            toggleFavorite={toggleFavorite}
+            toggleLike={actions.toggleLikedPost}
+          />
         )}
         {tab === "saves" && (
           <SavesView courses={courses} favoriteSet={favoriteSet}
@@ -83,9 +81,9 @@ export default function Home() {
         )}
         {tab === "me" && (
           <MeView
-            favoriteCount={favorites.length}
-            mineCount={myCourses.length}
-            totalKm={myCourses.reduce((s, c) => s + c.distance, 0)}
+            favoriteCount={savedCourseIds.length}
+            mineCount={userCourses.length}
+            totalKm={userCourses.reduce((s, c) => s + c.distance, 0)}
           />
         )}
 
@@ -104,13 +102,13 @@ export default function Home() {
               {item.id === "saves" && (
                 <>
                   <IconBookmark size={20}/>
-                  {(favorites.length + myCourses.length) > 0 && (
+                  {(savedCourseIds.length + userCourses.length) > 0 && (
                     <span style={{ position: "absolute", top: 4, right: 6, minWidth: 16,
                                    height: 16, padding: "0 4px", borderRadius: 999,
                                    background: "var(--pink-deep)", color: "#fff",
                                    fontSize: 9, fontWeight: 800, display: "flex",
                                    alignItems: "center", justifyContent: "center" }}>
-                      {favorites.length + myCourses.length}
+                      {savedCourseIds.length + userCourses.length}
                     </span>
                   )}
                 </>
@@ -363,25 +361,15 @@ function PostMapPreview({ course }: { course: Course }) {
   );
 }
 
-function FeedView({ courses, favoriteSet, toggleFavorite }: {
-  courses: Course[]; favoriteSet: Set<string>; toggleFavorite: (id: string) => void;
+function FeedView({ courses, favoriteSet, likedPostIds, toggleFavorite, toggleLike }: {
+  courses: Course[];
+  favoriteSet: Set<string>;
+  likedPostIds: Set<string>;
+  toggleFavorite: (id: string) => void;
+  toggleLike: (id: string) => void;
 }) {
   const [feedFilter, setFeedFilter] = useState("최신");
-  const [likedIds, setLikedIds] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("dduim:liked:v1") || "[]")); }
-    catch { return new Set(); }
-  });
   const FEED_FILTERS = ["최신", "내 친구", "동네", "인기 많은"];
-
-  const toggleLike = (id: string) => {
-    setLikedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      try { localStorage.setItem("dduim:liked:v1", JSON.stringify([...next])); } catch {}
-      return next;
-    });
-  };
-
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <div style={{ padding: "10px 18px 12px", flexShrink: 0, background: "var(--bg-cream)" }}>
@@ -399,7 +387,7 @@ function FeedView({ courses, favoriteSet, toggleFavorite }: {
         {POSTS.map(post => {
           const course = courses.find(c => c.id === post.courseId);
           if (!course) return null;
-          const userLiked = likedIds.has(post.id) ? !post.isLiked : post.isLiked;
+          const userLiked = likedPostIds.has(post.id) ? !post.isLiked : post.isLiked;
           const likeCount = post.likes + (userLiked && !post.isLiked ? 1 : !userLiked && post.isLiked ? -1 : 0);
           const min = Math.floor(post.record.totalSec / 60);
           const sec = post.record.totalSec % 60;
