@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Course, LatLngLiteral } from "@/lib/dduim/types";
 import { PACE_PRESETS, TAG_CATALOG } from "@/lib/dduim/data";
-import { calcGeoDistance, createCourseId, deriveNormalizedPath, smoothedPath } from "@/lib/dduim/utils";
+import { calcGeoDistance, createCourseId, deriveNormalizedPath, generateReturnPath, smoothedPath } from "@/lib/dduim/utils";
 import { IconClock } from "./icons";
 import {
   loadKakaoMap,
@@ -26,12 +26,21 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
+  const [returnPointIdx, setReturnPointIdx] = useState<number | null>(null);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<KakaoMap | null>(null);
   const polylineRef = useRef<KakaoPolyline | null>(null);
+  const returnPolylineRef = useRef<KakaoPolyline | null>(null);
   const markersRef = useRef<KakaoMarker[]>([]);
+  const returnMarkerRef = useRef<KakaoMarker | null>(null);
   const initialCenterRef = useRef(initialCenter);
+  const returnPointIdxRef = useRef<number | null>(null);
+
+  // returnPointIdx ref 동기화 (map click handler에서 사용)
+  useEffect(() => {
+    returnPointIdxRef.current = returnPointIdx;
+  }, [returnPointIdx]);
 
   const pace = PACE_PRESETS.find(p => p.id === paceId) || PACE_PRESETS[1];
   const km = calcGeoDistance(geoPoints);
@@ -66,7 +75,7 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
         });
         mapRef.current = map;
         maps.event.addListener(map, "click", (mouseEvent) => {
-          if (cancelled) return;
+          if (cancelled || returnPointIdxRef.current !== null) return;
           const latlng = mouseEvent.latLng;
           setGeoPoints(prev => [...prev, { lat: latlng.getLat(), lng: latlng.getLng() }]);
         });
@@ -78,12 +87,16 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
       cancelled = true;
       polylineRef.current?.setMap(null);
       polylineRef.current = null;
+      returnPolylineRef.current?.setMap(null);
+      returnPolylineRef.current = null;
       markersRef.current.forEach(m => m.setMap(null));
       markersRef.current = [];
+      returnMarkerRef.current?.setMap(null);
+      returnMarkerRef.current = null;
     };
   }, []);
 
-  // 폴리라인 업데이트
+  // 폴리라인 업데이트 (전진 경로 + 복귀 경로)
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     let alive = true;
@@ -91,52 +104,108 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
       if (!alive || !mapRef.current) return;
       polylineRef.current?.setMap(null);
       polylineRef.current = null;
+      returnPolylineRef.current?.setMap(null);
+      returnPolylineRef.current = null;
       if (geoPoints.length < 2) return;
+
+      const splitIdx = returnPointIdx ?? geoPoints.length - 1;
+      const forwardPoints = geoPoints.slice(0, splitIdx + 1);
+
       polylineRef.current = new maps.Polyline({
         map: mapRef.current,
-        path: geoPoints.map(p => new maps.LatLng(p.lat, p.lng)),
+        path: forwardPoints.map(p => new maps.LatLng(p.lat, p.lng)),
         strokeWeight: 5,
         strokeColor: "#6FC2A6",
         strokeOpacity: 0.9,
         strokeStyle: "solid",
       });
+
+      if (returnPointIdx !== null && geoPoints.length > returnPointIdx + 1) {
+        const returnSegment = geoPoints.slice(returnPointIdx);
+        returnPolylineRef.current = new maps.Polyline({
+          map: mapRef.current,
+          path: returnSegment.map(p => new maps.LatLng(p.lat, p.lng)),
+          strokeWeight: 4,
+          strokeColor: "#6FC2A6",
+          strokeOpacity: 0.5,
+          strokeStyle: "dashed",
+        });
+      }
     });
     return () => { alive = false; };
-  }, [geoPoints, mapReady]);
+  }, [geoPoints, mapReady, returnPointIdx]);
 
-  // 마커 업데이트 (드래그 가능)
+  // 마커 업데이트 (전진 경로 점만 드래그 가능, 반환점 전용 마커)
   useEffect(() => {
     if (!mapReady || !mapRef.current) return;
     let alive = true;
     loadKakaoMap().then(maps => {
       if (!alive || !mapRef.current) return;
       markersRef.current.forEach(m => m.setMap(null));
-      markersRef.current = geoPoints.map((pt, i) => {
+      returnMarkerRef.current?.setMap(null);
+      returnMarkerRef.current = null;
+
+      const forwardPoints = returnPointIdx !== null
+        ? geoPoints.slice(0, returnPointIdx + 1)
+        : geoPoints;
+
+      markersRef.current = forwardPoints.map((pt, i) => {
         const isStart = i === 0;
-        const isEnd = i === geoPoints.length - 1 && geoPoints.length > 1;
+        const isEnd = i === forwardPoints.length - 1 && forwardPoints.length > 1;
         const sz = isStart ? 28 : isEnd ? 22 : 10;
         const image = new maps.MarkerImage(makeSvgMarkerUrl(isStart, isEnd), new maps.Size(sz, sz));
         const marker = new maps.Marker({
           map: mapRef.current!,
           position: new maps.LatLng(pt.lat, pt.lng),
-          draggable: true,
+          draggable: returnPointIdx === null,
           image,
           zIndex: isStart ? 30 : isEnd ? 25 : 20,
         });
-        maps.event.addListener(marker, "dragend", () => {
-          if (!alive) return;
-          const pos = marker.getPosition();
-          setGeoPoints(prev => {
-            const updated = [...prev];
-            updated[i] = { lat: pos.getLat(), lng: pos.getLng() };
-            return updated;
+        if (returnPointIdx === null) {
+          maps.event.addListener(marker, "dragend", () => {
+            if (!alive) return;
+            const pos = marker.getPosition();
+            setGeoPoints(prev => {
+              const updated = [...prev];
+              updated[i] = { lat: pos.getLat(), lng: pos.getLng() };
+              return updated;
+            });
           });
-        });
+        }
         return marker;
       });
+
+      // 반환점 전용 마커
+      if (returnPointIdx !== null && geoPoints[returnPointIdx]) {
+        const pt = geoPoints[returnPointIdx];
+        const image = new maps.MarkerImage(makeTurnaroundMarkerUrl(), new maps.Size(30, 30));
+        returnMarkerRef.current = new maps.Marker({
+          map: mapRef.current!,
+          position: new maps.LatLng(pt.lat, pt.lng),
+          draggable: false,
+          image,
+          zIndex: 35,
+        });
+      }
     });
     return () => { alive = false; };
-  }, [geoPoints, mapReady]);
+  }, [geoPoints, mapReady, returnPointIdx]);
+
+  // 왕복 경로 활성화
+  const handleActivateReturn = () => {
+    if (geoPoints.length < 2 || returnPointIdx !== null) return;
+    const idx = geoPoints.length - 1;
+    const returnPoints = generateReturnPath(geoPoints);
+    setReturnPointIdx(idx);
+    setGeoPoints(prev => [...prev, ...returnPoints]);
+  };
+
+  // 왕복 모드 취소
+  const handleCancelReturn = () => {
+    if (returnPointIdx === null) return;
+    setGeoPoints(prev => prev.slice(0, returnPointIdx + 1));
+    setReturnPointIdx(null);
+  };
 
   const handleSave = () => {
     const tagObjs = selectedTags
@@ -174,12 +243,22 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
           <h1>{stage === "draw" ? "코스 그리기" : "코스 정보"}</h1>
           <p>
             {stage === "draw"
-              ? (geoPoints.length === 0 ? "지도를 탭해 시작점을 찍어주세요 👇" : `${geoPoints.length}개 지점 · 탭해서 이어가기`)
+              ? (geoPoints.length === 0
+                  ? "지도를 탭해 시작점을 찍어주세요 👇"
+                  : returnPointIdx !== null
+                    ? `왕복 코스 · ${returnPointIdx + 1}개 지점`
+                    : `${geoPoints.length}개 지점 · 탭해서 이어가기`)
               : "코스 이름과 태그를 정해주세요"}
           </p>
         </div>
         {stage === "draw" && geoPoints.length > 0 && (
-          <button className="icon-btn" onClick={() => setGeoPoints(p => p.slice(0, -1))} aria-label="되돌리기">
+          <button className="icon-btn" onClick={() => {
+            if (returnPointIdx !== null) {
+              handleCancelReturn();
+            } else {
+              setGeoPoints(p => p.slice(0, -1));
+            }
+          }} aria-label="되돌리기">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2C2A29"
                  strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 1 1 0 10h-2"/>
@@ -215,10 +294,29 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
                   {minsRounded >= 60 ? `${Math.floor(minsRounded / 60)}시간 ${minsRounded % 60}분` : `${minsRounded}분`}
                 </span>
                 <span className="dot-divider"/>
-                <span style={{ fontSize: 12, color: "var(--text-3)" }}>{geoPoints.length}개 지점</span>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>
+                  {returnPointIdx !== null ? `왕복` : `${geoPoints.length}개 지점`}
+                </span>
               </div>
             </div>
-            {geoPoints.length > 0 && (
+            {geoPoints.length >= 2 && (
+              <button
+                onClick={returnPointIdx !== null ? handleCancelReturn : handleActivateReturn}
+                style={{
+                  height: 36, padding: "0 14px", borderRadius: 999,
+                  background: returnPointIdx !== null ? "var(--mint-deep)" : "transparent",
+                  border: returnPointIdx !== null ? "1px solid var(--mint-deep)" : "1px solid var(--border-warm)",
+                  cursor: "pointer",
+                  color: returnPointIdx !== null ? "#fff" : "var(--text-2)",
+                  fontWeight: 700, fontSize: 12.5, fontFamily: "inherit",
+                  display: "flex", alignItems: "center", gap: 4,
+                }}
+              >
+                <span>↩</span>
+                <span>{returnPointIdx !== null ? "왕복 취소" : "왕복"}</span>
+              </button>
+            )}
+            {geoPoints.length > 0 && returnPointIdx === null && (
               <button onClick={() => setGeoPoints([])} style={{
                 height: 36, padding: "0 14px", borderRadius: 999, background: "transparent",
                 border: "1px solid var(--border-warm)", cursor: "pointer",
@@ -283,6 +381,12 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
                   <span className="dot-divider"/>
                   <span style={{ fontSize: 12, color: "var(--text-3)" }}>{pace.label} 페이스</span>
                 </div>
+                {returnPointIdx !== null && (
+                  <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700,
+                                color: "var(--mint-deep)", display: "flex", alignItems: "center", gap: 3 }}>
+                    <span>↩</span><span>왕복 코스</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -365,5 +469,10 @@ function makeSvgMarkerUrl(isStart: boolean, isEnd: boolean): string {
   } else {
     svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><circle cx="5" cy="5" r="3.5" fill="white" stroke="#2F8B6E" stroke-width="2"/></svg>`;
   }
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function makeTurnaroundMarkerUrl(): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><circle cx="15" cy="15" r="12" fill="#FF8C42" stroke="white" stroke-width="2.5"/><path d="M10 15 Q10 10 15 10 Q20 10 20 15 L20 18 M17 16 L20 18 L20 14" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }

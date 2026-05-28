@@ -86,6 +86,51 @@ function segmentKm(a: LatLngLiteral, b: LatLngLiteral): number {
 }
 
 /**
+ * 왕복 경로의 돌아오는 경로를 생성합니다.
+ * 겹침을 최소화하기 위해 각 점을 진행 방향 오른쪽으로 살짝 오프셋합니다.
+ * @param points 전진 경로 좌표 배열 (반환점 포함)
+ * @param offsetMeters 수직 오프셋 거리 (기본값: 8m)
+ */
+export function generateReturnPath(points: LatLngLiteral[], offsetMeters = 8): LatLngLiteral[] {
+  if (points.length < 2) return [];
+
+  // 반환점(마지막 점)을 제외하고 역순으로 생성
+  const reversed = [...points].reverse().slice(1);
+
+  return reversed.map((pt, i) => {
+    let dlng: number, dlat: number;
+    if (reversed.length === 1) {
+      dlng = points[points.length - 1].lng - points[points.length - 2].lng;
+      dlat = points[points.length - 1].lat - points[points.length - 2].lat;
+    } else if (i === 0) {
+      dlng = reversed[1].lng - reversed[0].lng;
+      dlat = reversed[1].lat - reversed[0].lat;
+    } else if (i === reversed.length - 1) {
+      dlng = reversed[i].lng - reversed[i - 1].lng;
+      dlat = reversed[i].lat - reversed[i - 1].lat;
+    } else {
+      dlng = reversed[i + 1].lng - reversed[i - 1].lng;
+      dlat = reversed[i + 1].lat - reversed[i - 1].lat;
+    }
+
+    const len = Math.sqrt(dlng * dlng + dlat * dlat);
+    if (len === 0) return pt;
+
+    // 진행 방향의 오른쪽 수직 방향 (시계방향 90도)
+    const perpLat = -dlng / len;
+    const perpLng = dlat / len;
+
+    const latDeg = offsetMeters / 111000;
+    const lngDeg = offsetMeters / (111000 * Math.cos((pt.lat * Math.PI) / 180));
+
+    return {
+      lat: pt.lat + perpLat * latDeg,
+      lng: pt.lng + perpLng * lngDeg,
+    };
+  });
+}
+
+/**
  * 경로에서 intervalKm 간격마다의 지리 좌표를 반환합니다.
  * 예: intervalKm=1 → 1km, 2km, 3km … 지점
  */
