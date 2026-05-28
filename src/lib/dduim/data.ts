@@ -1,4 +1,5 @@
 import type { Course, Post, TagColor } from "./types";
+import { REGION_DATA } from "@/constants/regions";
 
 export const COLOR_INK: Record<TagColor, string> = {
   mint: "#2F8B6E", pink: "#C04C5A", yellow: "#B07A00",
@@ -17,21 +18,7 @@ export const COLOR_MID: Record<TagColor, string> = {
 export const FAVORITE_KEY = "dduim:favorites:v1";
 export const MINE_KEY = "dduim:mine:v1";
 
-export const AREAS = [
-  {
-    id: "seoul", name: "서울", dot: "#B6E4D2", lat: 37.5665, lng: 126.9780, level: 9,
-    subs: [
-      { id: "seoul-songpa",       name: "송파구",  lat: 37.5145, lng: 127.1059, level: 7 },
-      { id: "seoul-mapo",         name: "마포구",  lat: 37.5665, lng: 126.9020, level: 7 },
-      { id: "seoul-yeongdeungpo", name: "영등포구", lat: 37.5264, lng: 126.8963, level: 7 },
-      { id: "seoul-gwangjin",     name: "광진구",  lat: 37.5385, lng: 127.0823, level: 7 },
-      { id: "seoul-seocho",       name: "서초구",  lat: 37.4837, lng: 127.0325, level: 7 },
-      { id: "seoul-gangnam",      name: "강남구",  lat: 37.5172, lng: 127.0473, level: 7 },
-      { id: "seoul-yongsan",      name: "용산구",  lat: 37.5311, lng: 126.9810, level: 7 },
-      { id: "seoul-seongdong",    name: "성동구",  lat: 37.5633, lng: 127.0369, level: 7 },
-    ],
-  },
-];
+export const AREAS = Object.entries(REGION_DATA).map(([id, r]) => ({ id, ...r }));
 
 export const PACE_PRESETS = [
   { id: "walk", label: "산책",   pace: 8.0, emoji: "🚶" },
