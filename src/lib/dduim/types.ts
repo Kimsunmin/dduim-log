@@ -13,8 +13,15 @@ export type Course = {
   saves: number;
   anchor: { x: number; y: number };
   path: Array<{ x: number; y: number }>;
+  startPoint?: LatLngLiteral;
+  geoPath?: LatLngLiteral[];
   tags: Array<{ text: string; emoji: string; color: TagColor }>;
   mine?: boolean;
+};
+
+export type LatLngLiteral = {
+  lat: number;
+  lng: number;
 };
 
 export type Post = {

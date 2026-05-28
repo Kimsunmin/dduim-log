@@ -195,6 +195,36 @@ button { cursor: pointer; }
 
 .map-svg { display: block; height: 100%; width: 100%; }
 
+.kakao-map-shell {
+  inset: 0;
+  position: absolute;
+}
+
+.kakao-map {
+  height: 100%;
+  width: 100%;
+}
+
+.map-loading {
+  align-items: center;
+  background: var(--map-bg);
+  color: var(--text-3);
+  display: flex;
+  font-size: 13px;
+  font-weight: 800;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+
+.map-loading span {
+  background: rgba(253, 252, 248, 0.9);
+  border: 1px solid var(--border-warm);
+  border-radius: 999px;
+  box-shadow: var(--shadow-soft);
+  padding: 10px 16px;
+}
+
 .pin-layer { inset: 0; pointer-events: none; position: absolute; }
 
 .shoe-pin {

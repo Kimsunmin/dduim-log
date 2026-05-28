@@ -9,10 +9,9 @@ import { BottomSheet } from "@/components/dduim/BottomSheet";
 import { CourseCard } from "@/components/dduim/CourseCard";
 import { DrawingMode } from "@/components/dduim/DrawingMode";
 import { IconBookmark, IconChevronDown, IconCompass, IconMap, IconPlus, IconSearch, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
+import { KakaoMapView } from "@/components/dduim/KakaoMapView";
 import { MiniMap } from "@/components/dduim/MiniMap";
-import { MapView } from "@/components/dduim/MapView";
 import { MyCourseLines } from "@/components/dduim/MyCourseLines";
-import { ShoePins } from "@/components/dduim/ShoePins";
 
 export default function Home() {
   const [tab, setTab] = useState<TabId>("home");
@@ -243,10 +242,9 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
       </div>
 
       <section className="map-shell">
-        <MapView courses={courses.filter(c => !c.mine)} activeId={activeId}/>
-        <MyCourseLines courses={courses.filter(c => c.mine)} activeId={activeId}/>
-        <ShoePins courses={visibleCourses} activeId={activeId}
+        <KakaoMapView courses={visibleCourses.filter(c => !c.mine)} activeId={activeId}
           onPick={id => { setActiveId(id); setSnap("peek"); }}/>
+        <MyCourseLines courses={courses.filter(c => c.mine)} activeId={activeId}/>
         <div className="user-dot"/>
 
         <div style={{ position: "absolute", right: 12, top: 12, zIndex: 6 }}>
