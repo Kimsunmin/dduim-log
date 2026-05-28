@@ -1,62 +1,161 @@
 import { useEffect, useRef, useState } from "react";
-import type { Course } from "@/lib/dduim/types";
+import type { Course, LatLngLiteral } from "@/lib/dduim/types";
 import { PACE_PRESETS, TAG_CATALOG } from "@/lib/dduim/data";
-import { calcDistance, createCourseId, smoothedPath } from "@/lib/dduim/utils";
+import { calcGeoDistance, createCourseId, deriveNormalizedPath, smoothedPath } from "@/lib/dduim/utils";
 import { IconClock } from "./icons";
-import { MapView } from "./MapView";
+import {
+  loadKakaoMap,
+  type KakaoMarker,
+  type KakaoMap,
+  type KakaoPolyline,
+} from "@/lib/kakao/load-kakao-map";
+import { reverseGeocode } from "@/lib/kakao/reverse-geocode";
 
-export function DrawingMode({ onExit, onSave }: {
-  onExit: () => void; onSave: (course: Course) => void;
+const DEFAULT_CENTER = { lat: 37.52693, lng: 126.93447 };
+
+export function DrawingMode({ onExit, onSave, initialCenter }: {
+  onExit: () => void;
+  onSave: (course: Course) => void;
+  initialCenter?: { lat: number; lng: number; level?: number };
 }) {
-  const [points, setPoints] = useState<Array<{ x: number; y: number }>>([]);
+  const [geoPoints, setGeoPoints] = useState<LatLngLiteral[]>([]);
+  const [addressShort, setAddressShort] = useState("");
   const [paceId, setPaceId] = useState<"walk" | "jog" | "run" | "fast">("jog");
   const [stage, setStage] = useState<"draw" | "details">("draw");
   const [title, setTitle] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [aspect, setAspect] = useState(1.0);
-  const canvasRef = useRef<HTMLDivElement>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [mapFailed, setMapFailed] = useState(false);
 
-  useEffect(() => {
-    const measure = () => {
-      const el = canvasRef.current;
-      if (el) setAspect(el.clientHeight / Math.max(1, el.clientWidth));
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<KakaoMap | null>(null);
+  const polylineRef = useRef<KakaoPolyline | null>(null);
+  const markersRef = useRef<KakaoMarker[]>([]);
+  const initialCenterRef = useRef(initialCenter);
 
   const pace = PACE_PRESETS.find(p => p.id === paceId) || PACE_PRESETS[1];
-  const km = calcDistance(points, aspect);
+  const km = calcGeoDistance(geoPoints);
   const minsRounded = Math.max(1, Math.round(km * pace.pace));
-  const canSave = points.length >= 2 && km > 0.05;
+  const canSave = geoPoints.length >= 2 && km > 0.05;
+  const normalizedPath = deriveNormalizedPath(geoPoints);
+  const smoothD = smoothedPath(normalizedPath);
 
-  const onCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return;
-    setPoints(prev => [...prev, { x, y }]);
-  };
+  const firstLat = geoPoints[0]?.lat;
+  const firstLng = geoPoints[0]?.lng;
 
-  const smoothD = smoothedPath(points);
+  // 시작점이 바뀔 때마다 역지오코딩으로 약식 주소 갱신
+  useEffect(() => {
+    if (firstLat === undefined || firstLng === undefined) return;
+    let cancelled = false;
+    reverseGeocode(firstLat, firstLng).then(addr => {
+      if (!cancelled) setAddressShort(addr);
+    });
+    return () => { cancelled = true; };
+  }, [firstLat, firstLng]);
+
+  // 카카오 지도 초기화 및 클릭 이벤트 등록
+  useEffect(() => {
+    let cancelled = false;
+    loadKakaoMap()
+      .then(maps => {
+        if (cancelled || !mapContainerRef.current) return;
+        const center = initialCenterRef.current ?? DEFAULT_CENTER;
+        const map = new maps.Map(mapContainerRef.current, {
+          center: new maps.LatLng(center.lat, center.lng),
+          level: center.level ?? 5,
+        });
+        mapRef.current = map;
+        maps.event.addListener(map, "click", (mouseEvent) => {
+          if (cancelled) return;
+          const latlng = mouseEvent.latLng;
+          setGeoPoints(prev => [...prev, { lat: latlng.getLat(), lng: latlng.getLng() }]);
+        });
+        setMapReady(true);
+      })
+      .catch(() => { if (!cancelled) setMapFailed(true); });
+
+    return () => {
+      cancelled = true;
+      polylineRef.current?.setMap(null);
+      polylineRef.current = null;
+      markersRef.current.forEach(m => m.setMap(null));
+      markersRef.current = [];
+    };
+  }, []);
+
+  // 폴리라인 업데이트
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    let alive = true;
+    loadKakaoMap().then(maps => {
+      if (!alive || !mapRef.current) return;
+      polylineRef.current?.setMap(null);
+      polylineRef.current = null;
+      if (geoPoints.length < 2) return;
+      polylineRef.current = new maps.Polyline({
+        map: mapRef.current,
+        path: geoPoints.map(p => new maps.LatLng(p.lat, p.lng)),
+        strokeWeight: 5,
+        strokeColor: "#6FC2A6",
+        strokeOpacity: 0.9,
+        strokeStyle: "solid",
+      });
+    });
+    return () => { alive = false; };
+  }, [geoPoints, mapReady]);
+
+  // 마커 업데이트 (드래그 가능)
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    let alive = true;
+    loadKakaoMap().then(maps => {
+      if (!alive || !mapRef.current) return;
+      markersRef.current.forEach(m => m.setMap(null));
+      markersRef.current = geoPoints.map((pt, i) => {
+        const isStart = i === 0;
+        const isEnd = i === geoPoints.length - 1 && geoPoints.length > 1;
+        const sz = isStart ? 28 : isEnd ? 22 : 10;
+        const image = new maps.MarkerImage(makeSvgMarkerUrl(isStart, isEnd), new maps.Size(sz, sz));
+        const marker = new maps.Marker({
+          map: mapRef.current!,
+          position: new maps.LatLng(pt.lat, pt.lng),
+          draggable: true,
+          image,
+          zIndex: isStart ? 30 : isEnd ? 25 : 20,
+        });
+        maps.event.addListener(marker, "dragend", () => {
+          if (!alive) return;
+          const pos = marker.getPosition();
+          setGeoPoints(prev => {
+            const updated = [...prev];
+            updated[i] = { lat: pos.getLat(), lng: pos.getLng() };
+            return updated;
+          });
+        });
+        return marker;
+      });
+    });
+    return () => { alive = false; };
+  }, [geoPoints, mapReady]);
 
   const handleSave = () => {
     const tagObjs = selectedTags
       .map(t => TAG_CATALOG.find(c => c.text === t))
       .filter((t): t is (typeof TAG_CATALOG)[number] => Boolean(t));
     onSave({
-      id: createCourseId(title, points, km),
+      id: createCourseId(title, normalizedPath, km),
       title: title.trim() || "이름 없는 코스",
-      area: "내 코스",
+      area: addressShort || "내 코스",
       distance: +km.toFixed(1),
       minutes: minsRounded,
       elevation: Math.round(km * 3),
       color: tagObjs[0]?.color || "mint",
       author: "나",
       saves: 0,
-      anchor: points[0],
-      path: points,
+      anchor: normalizedPath[0] ?? { x: 0.5, y: 0.5 },
+      path: normalizedPath,
+      geoPath: geoPoints,
+      startPoint: geoPoints[0],
       tags: tagObjs.length ? tagObjs : [{ text: "내코스", emoji: "🎒", color: "mint" }],
       mine: true,
     });
@@ -75,12 +174,12 @@ export function DrawingMode({ onExit, onSave }: {
           <h1>{stage === "draw" ? "코스 그리기" : "코스 정보"}</h1>
           <p>
             {stage === "draw"
-              ? (points.length === 0 ? "지도를 탭해 시작점을 찍어주세요 👇" : `${points.length}개 지점 · 탭해서 이어가기`)
+              ? (geoPoints.length === 0 ? "지도를 탭해 시작점을 찍어주세요 👇" : `${geoPoints.length}개 지점 · 탭해서 이어가기`)
               : "코스 이름과 태그를 정해주세요"}
           </p>
         </div>
-        {stage === "draw" && points.length > 0 && (
-          <button className="icon-btn" onClick={() => setPoints(p => p.slice(0, -1))} aria-label="되돌리기">
+        {stage === "draw" && geoPoints.length > 0 && (
+          <button className="icon-btn" onClick={() => setGeoPoints(p => p.slice(0, -1))} aria-label="되돌리기">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2C2A29"
                  strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M9 14l-4-4 4-4"/><path d="M5 10h9a5 5 0 1 1 0 10h-2"/>
@@ -91,43 +190,15 @@ export function DrawingMode({ onExit, onSave }: {
 
       {stage === "draw" && (
         <>
-          <div ref={canvasRef} className="draw-map" onClick={onCanvasClick}>
-            <MapView courses={[]} activeId=""/>
-            {points.length >= 1 && (
-              <svg width="100%" height="100%" preserveAspectRatio="none" viewBox="0 0 100 100"
-                   style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-                <path d={smoothD} fill="none" stroke="#fff" strokeWidth="2.4"
-                      strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"
-                      style={{ filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.15))" }}/>
-                <path d={smoothD} fill="none" stroke="var(--mint-deep)" strokeWidth="1.4"
-                      strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"
-                      style={{ strokeWidth: "5px" }}/>
-              </svg>
+          <div ref={mapContainerRef} className="draw-map">
+            {!mapReady && !mapFailed && (
+              <div className="map-loading"><span>지도 불러오는 중…</span></div>
             )}
-            {points.map((p, i) => {
-              const isStart = i === 0;
-              const isEnd = i === points.length - 1 && points.length > 1;
-              return (
-                <div key={i} style={{ position: "absolute", left: `${p.x * 100}%`, top: `${p.y * 100}%`,
-                                      transform: "translate(-50%, -50%)", pointerEvents: "none" }}>
-                  {isStart ? (
-                    <div style={{ width: 28, height: 28, borderRadius: 999, background: "var(--mint-deep)",
-                                  border: "3px solid #fff", display: "flex", alignItems: "center",
-                                  justifyContent: "center", boxShadow: "var(--shadow-pin)",
-                                  color: "#fff", fontWeight: 800, fontSize: 11 }}>S</div>
-                  ) : isEnd ? (
-                    <div style={{ width: 22, height: 22, borderRadius: 999, background: "#fff",
-                                  border: "3px solid var(--mint-deep)", boxShadow: "var(--shadow-pin)" }}/>
-                  ) : (
-                    <div style={{ width: 10, height: 10, borderRadius: 999, background: "#fff",
-                                  border: "2px solid var(--mint-deep)",
-                                  boxShadow: "0 1px 2px rgba(0,0,0,0.18)" }}/>
-                  )}
-                </div>
-              );
-            })}
-            {points.length === 0 && (
-              <div className="draw-hint">👆 탭해서 시작점 찍기</div>
+            {mapFailed && (
+              <div className="map-loading"><span>지도를 불러올 수 없어요</span></div>
+            )}
+            {mapReady && geoPoints.length === 0 && (
+              <div className="draw-hint">👆 지도를 탭해 시작점 찍기</div>
             )}
           </div>
 
@@ -144,11 +215,11 @@ export function DrawingMode({ onExit, onSave }: {
                   {minsRounded >= 60 ? `${Math.floor(minsRounded / 60)}시간 ${minsRounded % 60}분` : `${minsRounded}분`}
                 </span>
                 <span className="dot-divider"/>
-                <span style={{ fontSize: 12, color: "var(--text-3)" }}>{points.length}개 지점</span>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>{geoPoints.length}개 지점</span>
               </div>
             </div>
-            {points.length > 0 && (
-              <button onClick={() => setPoints([])} style={{
+            {geoPoints.length > 0 && (
+              <button onClick={() => setGeoPoints([])} style={{
                 height: 36, padding: "0 14px", borderRadius: 999, background: "transparent",
                 border: "1px solid var(--border-warm)", cursor: "pointer",
                 color: "var(--text-2)", fontWeight: 700, fontSize: 12.5, fontFamily: "inherit",
@@ -285,4 +356,14 @@ export function DrawingMode({ onExit, onSave }: {
   );
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
+function makeSvgMarkerUrl(isStart: boolean, isEnd: boolean): string {
+  let svg: string;
+  if (isStart) {
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"><circle cx="14" cy="14" r="11" fill="#2F8B6E" stroke="white" stroke-width="2.5"/><text x="14" y="18" text-anchor="middle" fill="white" font-weight="800" font-size="11" font-family="sans-serif">S</text></svg>`;
+  } else if (isEnd) {
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="8.5" fill="white" stroke="#2F8B6E" stroke-width="3"/></svg>`;
+  } else {
+    svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><circle cx="5" cy="5" r="3.5" fill="white" stroke="#2F8B6E" stroke-width="2"/></svg>`;
+  }
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}

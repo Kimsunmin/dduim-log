@@ -3,13 +3,28 @@ type KakaoLatLng = {
   getLng(): number;
 };
 
+type KakaoSize = object;
+type KakaoMarkerImage = object;
+
+export type KakaoMouseEvent = {
+  latLng: KakaoLatLng;
+};
+
 type KakaoMapsNamespace = {
   LatLng: new (lat: number, lng: number) => KakaoLatLng;
   Map: new (
     container: HTMLElement,
     options: { center: KakaoLatLng; level: number },
   ) => KakaoMap;
-  Marker: new (options: { map?: KakaoMap | null; position: KakaoLatLng }) => KakaoMarker;
+  Marker: new (options: {
+    map?: KakaoMap | null;
+    position: KakaoLatLng;
+    draggable?: boolean;
+    image?: KakaoMarkerImage;
+    zIndex?: number;
+  }) => KakaoMarker;
+  MarkerImage: new (src: string, size: KakaoSize) => KakaoMarkerImage;
+  Size: new (width: number, height: number) => KakaoSize;
   CustomOverlay: new (options: {
     clickable?: boolean;
     content: HTMLElement | string;
@@ -28,6 +43,7 @@ type KakaoMapsNamespace = {
     strokeStyle?: string;
   }) => KakaoPolyline;
   event: {
+    addListener(target: unknown, type: "click", handler: (e: KakaoMouseEvent) => void): void;
     addListener(target: unknown, type: string, handler: () => void): void;
   };
   load(callback: () => void): void;
@@ -36,11 +52,13 @@ type KakaoMapsNamespace = {
 export type KakaoMap = {
   panTo(position: KakaoLatLng): void;
   setCenter(position: KakaoLatLng): void;
+  setLevel(level: number): void;
   relayout(): void;
 };
 
 export type KakaoMarker = {
   setMap(map: KakaoMap | null): void;
+  getPosition(): { getLat(): number; getLng(): number };
 };
 
 export type KakaoCustomOverlay = {
@@ -116,7 +134,7 @@ export function loadKakaoMap() {
     const script = document.createElement("script");
     script.id = KAKAO_MAP_SDK_ID;
     script.async = true;
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&autoload=false`;
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${appKey}&libraries=services&autoload=false`;
     script.onload = handleLoad;
     script.onerror = () => {
       window.clearTimeout(timeout);

@@ -1,0 +1,28 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="#B6E4D2"></rect>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="none" stroke="#2F8B6E" stroke-width="2" opacity="0.18"></rect>
+
+  
+  <g transform="translate(8 16)">
+    
+    <path d="M2 24&#xA;             C 2 22, 3 20.5, 5 20.2&#xA;             L 12 19.3&#xA;             L 18 14&#xA;             C 20 12.5, 22 12, 24 12&#xA;             L 33 12&#xA;             C 35.5 12, 38 13, 40 15&#xA;             L 45 20&#xA;             C 46 21, 46.5 22, 46.5 23.5&#xA;             C 46.5 26, 44.5 27.6, 41.8 27.6&#xA;             L 6.5 27.6&#xA;             C 4 27.6, 2 26, 2 24 Z" fill="#2C2A29"></path>
+
+    
+    <path d="M14 19&#xA;             L 19 13.5&#xA;             L 22 9.5&#xA;             C 23.2 8, 25 7, 27 7.3&#xA;             L 32.5 8.2&#xA;             C 34.5 8.5, 36 10, 36 12.2&#xA;             L 36 14" stroke="#2C2A29" stroke-width="3" fill="none" stroke-linecap="round"></path>
+
+    
+    <g stroke="#FDFCF8" stroke-width="1.6" stroke-linecap="round">
+      <line x1="22" y1="13" x2="25" y2="11.5"></line>
+      <line x1="25" y1="15" x2="28.5" y2="13"></line>
+      <line x1="28" y1="17" x2="32" y2="15"></line>
+    </g>
+
+    
+    <line x1="5" y1="25.5" x2="44" y2="25.5" stroke="#FDFCF8" stroke-width="1.4" stroke-linecap="round"></line>
+
+    
+    <circle cx="42" cy="10" r="2.6" fill="#FFCF4D"></circle>
+  </g>
+</svg>

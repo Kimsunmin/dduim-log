@@ -1,4 +1,4 @@
-import type { LatLngLiteral } from "./types";
+import type { LatLngLiteral, NormalizedPoint } from "./types";
 
 export function readJson<T>(key: string, fallback: T): T {
   try { return JSON.parse(localStorage.getItem(key) || "") as T; }
@@ -58,4 +58,64 @@ export function createCourseId(title: string, points: Array<{ x: number; y: numb
   const slug = (title.trim() || "course").replace(/[^\w가-힣]+/g, "-").replace(/^-|-$/g, "").slice(0, 18);
   const shape = points.slice(0, 4).map(p => `${Math.round(p.x * 100)}${Math.round(p.y * 100)}`).join("-");
   return `mine-${slug}-${Math.round(distance * 1000)}-${shape}`;
+}
+
+export function deriveNormalizedPath(geoPoints: LatLngLiteral[]): NormalizedPoint[] {
+  if (geoPoints.length === 0) return [];
+  if (geoPoints.length === 1) return [{ x: 0.5, y: 0.5 }];
+  const lats = geoPoints.map(p => p.lat);
+  const lngs = geoPoints.map(p => p.lng);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const latRange = maxLat - minLat || 0.001;
+  const lngRange = maxLng - minLng || 0.001;
+  return geoPoints.map(p => ({
+    x: (p.lng - minLng) / lngRange,
+    y: 1 - (p.lat - minLat) / latRange,
+  }));
+}
+
+/** 두 좌표 간 Haversine 거리 (km) */
+function segmentKm(a: LatLngLiteral, b: LatLngLiteral): number {
+  const R = 6371;
+  const toRad = (v: number) => v * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const sinA = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(sinA), Math.sqrt(1 - sinA));
+}
+
+/**
+ * 경로에서 intervalKm 간격마다의 지리 좌표를 반환합니다.
+ * 예: intervalKm=1 → 1km, 2km, 3km … 지점
+ */
+export function getKmMarkerPoints(
+  geoPath: LatLngLiteral[],
+  intervalKm = 1,
+): Array<{ point: LatLngLiteral; km: number }> {
+  if (geoPath.length < 2) return [];
+
+  const results: Array<{ point: LatLngLiteral; km: number }> = [];
+  let accumulated = 0;
+  let nextThreshold = intervalKm;
+
+  for (let i = 1; i < geoPath.length; i++) {
+    const segDist = segmentKm(geoPath[i - 1], geoPath[i]);
+
+    while (segDist > 0 && accumulated + segDist >= nextThreshold) {
+      const t = (nextThreshold - accumulated) / segDist;
+      results.push({
+        point: {
+          lat: geoPath[i - 1].lat + t * (geoPath[i].lat - geoPath[i - 1].lat),
+          lng: geoPath[i - 1].lng + t * (geoPath[i].lng - geoPath[i - 1].lng),
+        },
+        km: nextThreshold,
+      });
+      nextThreshold += intervalKm;
+    }
+
+    accumulated += segDist;
+  }
+
+  return results;
 }

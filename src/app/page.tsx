@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Course, SnapPosition } from "@/lib/dduim/types";
-import { AREAS, baseCourses, COLOR_BG, COLOR_INK, FILTER_OPTIONS, navItems, POSTS } from "@/lib/dduim/data";
+import { AREAS, FILTER_OPTIONS, navItems } from "@/lib/dduim/data";
 import type { TabId } from "@/lib/dduim/data";
 import { useDduimStore } from "@/lib/dduim/store";
 import { BottomSheet } from "@/components/dduim/BottomSheet";
@@ -15,16 +15,21 @@ import { MyCourseLines } from "@/components/dduim/MyCourseLines";
 
 export default function Home() {
   const [tab, setTab] = useState<TabId>("home");
-  const [activeId, setActiveId] = useState(baseCourses[0].id);
+  const [activeId, setActiveId] = useState(() =>
+    typeof window !== "undefined"
+      ? (new URLSearchParams(window.location.search).get("c") ?? "")
+      : ""
+  );
   const [filter, setFilter] = useState("전체");
   const [snap, setSnap] = useState<SnapPosition>("mid");
   const [drawingOpen, setDrawingOpen] = useState(false);
+  const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; level: number }>({ lat: 37.52693, lng: 126.93447, level: 7 });
   const [toast, setToast] = useState("");
-  const { userCourses, savedCourseIds, likedPostIds, actions } = useDduimStore();
+  const [limitModal, setLimitModal] = useState(false);
+  const { userCourses, savedCourseIds, currentUser, actions } = useDduimStore();
 
-  const courses = useMemo(() => [...userCourses, ...baseCourses], [userCourses]);
+  const courses = useMemo(() => [...userCourses], [userCourses]);
   const favoriteSet = useMemo(() => new Set(savedCourseIds), [savedCourseIds]);
-  const likedPostSet = useMemo(() => new Set(likedPostIds), [likedPostIds]);
   const visibleCourses = useMemo(() => {
     if (filter === "전체") return courses;
     return courses.filter(c => c.tags.some(t => t.text === filter));
@@ -44,8 +49,9 @@ export default function Home() {
     showToast(isSaved ? "즐겨찾기에 저장했어요" : "즐겨찾기에서 뺐어요");
   };
 
-  const saveMine = (course: Course) => {
-    actions.saveUserCourse(course);
+  const saveMine = async (course: Course) => {
+    const result = await actions.saveUserCourse(course);
+    if (result.limitReached) { setLimitModal(true); return; }
     setActiveId(course.id);
     setTab("home");
     setDrawingOpen(false);
@@ -53,6 +59,11 @@ export default function Home() {
   };
 
   const pickCourse = (id: string) => { setActiveId(id); setTab("home"); setSnap("peek"); };
+
+  const shareCourse = (id: string) => {
+    const url = `${window.location.origin}/?c=${encodeURIComponent(id)}`;
+    navigator.clipboard.writeText(url).then(() => showToast("링크를 복사했어요 📋"));
+  };
 
   return (
     <main className="stage">
@@ -64,16 +75,12 @@ export default function Home() {
             setActiveId={id => { setActiveId(id); setSnap("peek"); }}
             setFilter={setFilter} toggleFavorite={toggleFavorite}
             visibleCourses={visibleCourses} snap={snap} setSnap={setSnap}
+            onCenterChange={setMapCenter}
+            onShare={shareCourse}
           />
         )}
         {tab === "feed" && (
-          <FeedView
-            courses={courses}
-            favoriteSet={favoriteSet}
-            likedPostIds={likedPostSet}
-            toggleFavorite={toggleFavorite}
-            toggleLike={actions.toggleLikedPost}
-          />
+          <FeedView/>
         )}
         {tab === "saves" && (
           <SavesView courses={courses} favoriteSet={favoriteSet}
@@ -81,9 +88,11 @@ export default function Home() {
         )}
         {tab === "me" && (
           <MeView
+            currentUser={currentUser}
             favoriteCount={savedCourseIds.length}
             mineCount={userCourses.length}
             totalKm={userCourses.reduce((s, c) => s + c.distance, 0)}
+            onRenameUser={actions.updateDisplayName}
           />
         )}
 
@@ -120,27 +129,98 @@ export default function Home() {
         </nav>
 
         {drawingOpen && (
-          <DrawingMode onExit={() => setDrawingOpen(false)} onSave={saveMine}/>
+          <DrawingMode onExit={() => setDrawingOpen(false)} onSave={saveMine} initialCenter={mapCenter}/>
         )}
         <div className={`toast ${toast ? "is-show" : ""}`}>{toast}</div>
       </section>
+
+      {/* 코스 10개 제한 모달 */}
+      {limitModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999,
+                      background: "rgba(40,28,16,0.45)", backdropFilter: "blur(4px)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      padding: "0 24px" }}
+             onClick={() => setLimitModal(false)}>
+          <div style={{ background: "var(--bg-card)", borderRadius: 28,
+                        padding: "28px 24px 22px", maxWidth: 340, width: "100%",
+                        boxShadow: "0 8px 32px rgba(80,50,20,0.18)",
+                        textAlign: "center" }}
+               onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🏃</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text-1)",
+                          letterSpacing: "-0.025em", marginBottom: 8 }}>
+              코스를 더 만들 수 없어요
+            </div>
+            <p style={{ fontSize: 13.5, color: "var(--text-2)", lineHeight: 1.6,
+                        margin: "0 0 20px" }}>
+              초기 버전에서는 코스를<br/>
+              최대 <strong>10개</strong>까지만 만들 수 있어요.<br/>
+              곧 더 늘릴게요 🙏
+            </p>
+            <button onClick={() => setLimitModal(false)} style={{
+              width: "100%", height: 48, borderRadius: 16,
+              background: "var(--mint)", border: "none",
+              fontWeight: 800, fontSize: 15, color: "var(--text-1)",
+              fontFamily: "inherit", cursor: "pointer",
+            }}>확인</button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
 
 // ─── ExploreView ──────────────────────────────────────────────────────────────
 function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
-  orderedCourses, setActiveId, setFilter, toggleFavorite, visibleCourses, snap, setSnap }: {
+  orderedCourses, setActiveId, setFilter, toggleFavorite, visibleCourses, snap, setSnap, onCenterChange, onShare }: {
   activeCourse?: Course; activeId: string; courses: Course[];
   favoriteSet: Set<string>; filter: string; orderedCourses: Course[];
   setActiveId: (id: string) => void; setFilter: (f: string) => void;
   toggleFavorite: (id: string) => void; visibleCourses: Course[];
   snap: SnapPosition; setSnap: (s: SnapPosition) => void;
+  onCenterChange?: (center: { lat: number; lng: number; level: number }) => void;
+  onShare?: (id: string) => void;
 }) {
-  const [areaId, setAreaId] = useState("yeouido");
+  const [areaId, setAreaId] = useState("all");
   const [areaOpen, setAreaOpen] = useState(false);
+  const [expandedRegion, setExpandedRegion] = useState<string | null>(null);
+  const [panTarget, setPanTarget] = useState<{ lat: number; lng: number; level: number } | undefined>(undefined);
   const areaRef = useRef<HTMLDivElement>(null);
-  const currentArea = AREAS.find(a => a.id === areaId) || AREAS[0];
+
+  const areaLabel = (() => {
+    if (areaId === "all") return "전체 지역";
+    for (const r of AREAS) {
+      if (r.id === areaId) return r.name;
+      const sub = r.subs.find(s => s.id === areaId);
+      if (sub) return `${r.name} · ${sub.name}`;
+    }
+    return "전체 지역";
+  })();
+
+  const currentDot = (() => {
+    for (const r of AREAS) {
+      if (r.id === areaId || r.subs.some(s => s.id === areaId)) return r.dot;
+    }
+    return "#B6E4D2";
+  })();
+
+  // 선택된 지역 이름 (구 단위 매칭용)
+  const areaFilterName = (() => {
+    if (areaId === "all") return null;
+    for (const r of AREAS) {
+      if (r.id === areaId) return r.name;
+      const sub = r.subs.find(s => s.id === areaId);
+      if (sub) return sub.name; // "마포구" 등
+    }
+    return null;
+  })();
+
+  const areaFilteredVisible = areaFilterName
+    ? visibleCourses.filter(c => c.area.includes(areaFilterName))
+    : visibleCourses;
+  const areaFilteredOrdered = areaFilterName
+    ? orderedCourses.filter(c => c.area.includes(areaFilterName))
+    : orderedCourses;
 
   useEffect(() => {
     if (!areaOpen) return;
@@ -157,7 +237,7 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
     <>
       <div style={{ padding: "6px 18px 10px", flexShrink: 0, position: "relative", zIndex: 40 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div ref={areaRef} style={{ position: "relative" }}>
+          <div ref={areaRef} style={{ position: "relative", flexShrink: 0 }}>
             <button onClick={() => setAreaOpen(o => !o)} style={{
               display: "flex", alignItems: "center", gap: 4,
               background: areaOpen ? "var(--bg-soft)" : "transparent",
@@ -166,64 +246,94 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
               transition: "background 0.15s ease",
             }}>
               <span style={{ width: 8, height: 8, borderRadius: 999,
-                             background: currentArea.dot, display: "inline-block" }}/>
-              <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: "-0.02em" }}>
-                {currentArea.name}
+                             background: currentDot, display: "inline-block" }}/>
+              <span style={{ fontSize: 17, fontWeight: 800, letterSpacing: "-0.02em",
+                             maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis",
+                             whiteSpace: "nowrap" }}>
+                {areaLabel}
               </span>
               <IconChevronDown size={14} style={{ transition: "transform 0.2s ease",
                 transform: areaOpen ? "rotate(180deg)" : "rotate(0)" } as React.CSSProperties}/>
             </button>
 
             {areaOpen && (
-              <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, width: 280,
+              <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, width: 260,
                             background: "var(--bg-card)", borderRadius: 22,
                             border: "1px solid var(--border-warm)",
                             boxShadow: "0 16px 40px -12px rgba(60,40,20,0.25), 0 4px 8px rgba(60,40,20,0.08)",
                             zIndex: 50, overflow: "hidden",
                             animation: "dropdown-in 0.18s cubic-bezier(0.32, 0.72, 0.24, 1)",
                             transformOrigin: "top left" }}>
-                <div style={{ padding: "12px 16px 8px", display: "flex",
-                              alignItems: "baseline", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-3)",
-                                 letterSpacing: "0.04em", textTransform: "uppercase" }}>지역 선택</span>
-                  <button onClick={() => setAreaOpen(false)} style={{
-                    background: "transparent", border: "none", padding: "2px 4px",
-                    fontSize: 11, color: "var(--text-3)", cursor: "pointer",
-                    fontFamily: "inherit", fontWeight: 600,
-                  }}>📍 내 주변</button>
-                </div>
-                <div style={{ maxHeight: 320, overflowY: "auto" }}>
-                  {AREAS.map(a => (
-                    <button key={a.id} onClick={() => { setAreaId(a.id); setAreaOpen(false); }} style={{
-                      display: "flex", alignItems: "center", gap: 12, width: "100%",
-                      padding: "11px 16px",
-                      background: a.id === areaId ? "var(--bg-soft)" : "transparent",
-                      border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
-                      transition: "background 0.12s ease",
-                    }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 999,
-                                     background: a.dot, flexShrink: 0 }}/>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-1)" }}>{a.name}</div>
-                        <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 1 }}>{a.sub}</div>
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)",
-                                     background: "var(--bg-soft)", padding: "3px 8px",
-                                     borderRadius: 999, flexShrink: 0 }}>{a.count}</span>
-                      {a.id === areaId && (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                             stroke="var(--mint-deep)" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M5 13l4 4L19 7"/>
-                        </svg>
-                      )}
-                    </button>
+                <div style={{ maxHeight: 380, overflowY: "auto" }}>
+                  {/* 전체 */}
+                  <button onClick={() => { setAreaId("all"); setPanTarget(undefined); setAreaOpen(false); }} style={{
+                    display: "flex", alignItems: "center", gap: 12, width: "100%",
+                    padding: "11px 16px",
+                    background: areaId === "all" ? "var(--bg-soft)" : "transparent",
+                    border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                    transition: "background 0.12s ease",
+                  }}>
+                    <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: "var(--text-1)" }}>전체 지역</span>
+                    {areaId === "all" && (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                           stroke="var(--mint-deep)" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M5 13l4 4L19 7"/>
+                      </svg>
+                    )}
+                  </button>
+
+                  <div style={{ height: 1, background: "var(--border-warm)", margin: "0 16px" }}/>
+
+                  {/* 시/도 → 구/군 계층 */}
+                  {AREAS.map(region => (
+                    <div key={region.id}>
+                      <button
+                        onClick={() => setExpandedRegion(prev => prev === region.id ? null : region.id)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10, width: "100%",
+                          padding: "11px 16px",
+                          background: "transparent",
+                          border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                          transition: "background 0.12s ease",
+                        }}>
+                        <span style={{ width: 10, height: 10, borderRadius: 999,
+                                       background: region.dot, flexShrink: 0 }}/>
+                        <span style={{ flex: 1, fontSize: 14, fontWeight: 800, color: "var(--text-1)" }}>
+                          {region.name}
+                        </span>
+                        <IconChevronDown size={12} style={{ transition: "transform 0.2s ease",
+                          transform: expandedRegion === region.id ? "rotate(180deg)" : "rotate(0)" } as React.CSSProperties}/>
+                      </button>
+
+                      {expandedRegion === region.id && region.subs.map(sub => (
+                        <button key={sub.id}
+                          onClick={() => { setAreaId(sub.id); setPanTarget({ lat: sub.lat, lng: sub.lng, level: sub.level }); setAreaOpen(false); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 10, width: "100%",
+                            padding: "9px 16px 9px 36px",
+                            background: areaId === sub.id ? "var(--bg-soft)" : "transparent",
+                            border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit",
+                            transition: "background 0.12s ease",
+                          }}>
+                          <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: "var(--text-2)" }}>
+                            {sub.name}
+                          </span>
+                          {areaId === sub.id && (
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                                 stroke="var(--mint-deep)" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M5 13l4 4L19 7"/>
+                            </svg>
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   ))}
                 </div>
               </div>
             )}
           </div>
 
-          <div style={{ flex: 1 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="search-pill" style={{ height: 38, padding: "0 14px", marginTop: 0 }}>
               <IconSearch size={16} color="#8B7F76"/>
               <input placeholder="코스 · 태그 검색"/>
@@ -240,11 +350,13 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
       </div>
 
       <section className="map-shell">
-        <KakaoMapView courses={visibleCourses.filter(c => !c.mine)} activeId={activeId}
+        <KakaoMapView courses={areaFilteredVisible} activeId={activeId}
+          favoriteIds={favoriteSet}
+          panToLatLng={panTarget}
+          onCenterChange={onCenterChange}
           onPick={id => { setActiveId(id); setSnap("peek"); }}/>
-        <MyCourseLines courses={courses.filter(c => c.mine)} activeId={activeId}/>
-        <div className="user-dot"/>
-
+        <MyCourseLines courses={courses.filter(c => c.mine && !c.geoPath?.length)} activeId={activeId}/>
+        
         <div style={{ position: "absolute", right: 12, top: 12, zIndex: 6 }}>
           <button className="icon-btn" aria-label="현재 위치" style={{ width: 36, height: 36 }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2C2A29"
@@ -267,21 +379,22 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
               <h2 style={{ margin: 0, color: "var(--text-1)", fontSize: 16,
                            fontWeight: 800, letterSpacing: "-0.02em" }}>
-                {currentArea.name} 코스
+                {areaLabel} 코스
               </h2>
               <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text-3)" }}>
-                {visibleCourses.length}
+                {areaFilteredVisible.length}
               </span>
             </div>
           </div>
           <div className="sheet-content">
-            {orderedCourses.map(c => (
+            {areaFilteredOrdered.map(c => (
               <CourseCard key={c.id} course={c} isActive={c.id === activeId}
                 isSaved={favoriteSet.has(c.id)}
                 onClick={() => { setActiveId(c.id); setSnap("peek"); }}
-                onToggleSave={toggleFavorite}/>
+                onToggleSave={toggleFavorite}
+                onShare={onShare ? () => onShare(c.id) : undefined}/>
             ))}
-            {orderedCourses.length === 0 && (
+            {areaFilteredOrdered.length === 0 && (
               <div style={{ padding: "40px 16px", textAlign: "center", color: "var(--text-3)" }}>
                 조건에 맞는 코스가 아직 없어요 🐣
               </div>
@@ -294,202 +407,19 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
 }
 
 // ─── FeedView ─────────────────────────────────────────────────────────────────
-function PostMapPreview({ course }: { course: Course }) {
-  const ink = COLOR_INK[course.color] || "#2F8B6E";
-  const bg  = COLOR_BG[course.color]  || "#DBF1E9";
-
-  const xs   = course.path.map(p => p.x), ys = course.path.map(p => p.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const spanX = Math.max(0.0001, maxX - minX), spanY = Math.max(0.0001, maxY - minY);
-  const span  = Math.max(spanX, spanY), pad = 0.16;
-  const norm  = (pt: { x: number; y: number }) => ({
-    x: pad + ((pt.x - minX) / span + (span - spanX) / (2 * span)) * (1 - 2 * pad),
-    y: pad + ((pt.y - minY) / span + (span - spanY) / (2 * span)) * (1 - 2 * pad),
-  });
-  const np = course.path.map(norm);
-  const smooth = (pts: typeof np) => {
-    if (pts.length < 2) return "";
-    let d = `M ${pts[0].x * 100} ${pts[0].y * 100}`;
-    for (let i = 1; i < pts.length - 1; i++) {
-      const mx = (pts[i].x + pts[i + 1].x) / 2 * 100;
-      const my = (pts[i].y + pts[i + 1].y) / 2 * 100;
-      d += ` Q ${pts[i].x * 100} ${pts[i].y * 100} ${mx} ${my}`;
-    }
-    d += ` T ${pts[pts.length - 1].x * 100} ${pts[pts.length - 1].y * 100}`;
-    return d;
-  };
-  const d = smooth(np);
-
+function FeedView() {
   return (
-    <div style={{ width: "100%", aspectRatio: "1.55 / 1", background: bg,
-                  position: "relative", overflow: "hidden" }}>
-      <svg width="100%" height="100%" viewBox="0 0 100 64" preserveAspectRatio="none"
-           style={{ position: "absolute", inset: 0 }}>
-        <g stroke="#fff" strokeWidth="0.3" opacity="0.5">
-          {[8, 16, 24, 32, 40, 48, 56].map(y => <line key={y} x1="0" y1={y} x2="100" y2={y}/>)}
-          {[10, 20, 30, 40, 50, 60, 70, 80, 90].map(x => <line key={x} x1={x} y1="0" x2={x} y2="64"/>)}
-        </g>
-        <ellipse cx="80" cy="14" rx="20" ry="10" fill="#fff" opacity="0.4"/>
-        <ellipse cx="14" cy="50" rx="16" ry="10" fill="#fff" opacity="0.45"/>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+                  justifyContent: "center", gap: 12, paddingBottom: 80 }}>
+      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#C8B89A" strokeWidth="1.4"
+           strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/>
+        <circle cx="12" cy="9" r="2.5"/>
       </svg>
-      <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none"
-           style={{ position: "absolute", inset: 0 }}>
-        <path d={d} fill="none" stroke="#fff" strokeWidth="6" vectorEffect="non-scaling-stroke"
-              strokeLinecap="round" strokeLinejoin="round"
-              style={{ filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.15))" }}/>
-        <path d={d} fill="none" stroke={ink} strokeWidth="3.4" vectorEffect="non-scaling-stroke"
-              strokeLinecap="round" strokeLinejoin="round"/>
-      </svg>
-      <div style={{ position: "absolute", left: `${np[0].x * 100}%`, top: `${np[0].y * 100}%`,
-                    transform: "translate(-50%, -50%)", width: 16, height: 16,
-                    borderRadius: 999, background: ink, border: "3px solid #fff",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.18)" }}/>
-      <div style={{ position: "absolute", left: `${np[np.length-1].x * 100}%`, top: `${np[np.length-1].y * 100}%`,
-                    transform: "translate(-50%, -50%)", width: 12, height: 12,
-                    borderRadius: 999, background: "#fff", border: `3px solid ${ink}`,
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.18)" }}/>
-      <div style={{ position: "absolute", top: 12, left: 12, display: "inline-flex",
-                    alignItems: "center", gap: 4, background: "rgba(253,252,248,0.94)",
-                    borderRadius: 999, padding: "5px 10px 5px 7px",
-                    fontSize: 11, fontWeight: 700, color: "var(--text-1)",
-                    boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-        <ShoeGlyph size={12}/>
-        <span>{course.title}</span>
+      <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text-1)", letterSpacing: "-0.025em" }}>
+        피드
       </div>
-    </div>
-  );
-}
-
-function FeedView({ courses, favoriteSet, likedPostIds, toggleFavorite, toggleLike }: {
-  courses: Course[];
-  favoriteSet: Set<string>;
-  likedPostIds: Set<string>;
-  toggleFavorite: (id: string) => void;
-  toggleLike: (id: string) => void;
-}) {
-  const [feedFilter, setFeedFilter] = useState("최신");
-  const FEED_FILTERS = ["최신", "내 친구", "동네", "인기 많은"];
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-      <div style={{ padding: "10px 18px 12px", flexShrink: 0, background: "var(--bg-cream)" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.025em", margin: 0 }}>피드</h1>
-        <div className="chips no-scrollbar" style={{ marginTop: 10 }}>
-          {FEED_FILTERS.map(f => (
-            <button key={f} className={`chip ${feedFilter === f ? "is-active" : ""}`}
-              onClick={() => setFeedFilter(f)}>{f}</button>
-          ))}
-        </div>
-      </div>
-      <div className="no-scrollbar" style={{ flex: 1, overflowY: "auto",
-                                              padding: "14px 14px 110px",
-                                              display: "flex", flexDirection: "column", gap: 14 }}>
-        {POSTS.map(post => {
-          const course = courses.find(c => c.id === post.courseId);
-          if (!course) return null;
-          const userLiked = likedPostIds.has(post.id) ? !post.isLiked : post.isLiked;
-          const likeCount = post.likes + (userLiked && !post.isLiked ? 1 : !userLiked && post.isLiked ? -1 : 0);
-          const min = Math.floor(post.record.totalSec / 60);
-          const sec = post.record.totalSec % 60;
-
-          return (
-            <article key={post.id} style={{ background: "var(--bg-card)", borderRadius: 24,
-                                            overflow: "hidden", border: "1px solid #F2EBDE",
-                                            boxShadow: "var(--shadow-card)" }}>
-              <header style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px" }}>
-                <div style={{ width: 32, height: 32, borderRadius: 999, flexShrink: 0,
-                              background: `linear-gradient(135deg, ${post.author.avatar[0]}, ${post.author.avatar[1]})` }}/>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--text-1)" }}>{post.author.name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>{post.timeAgo}</div>
-                </div>
-                <button style={{ background: "transparent", border: "none", padding: 4,
-                                 cursor: "pointer", color: "var(--text-3)" }} aria-label="더보기">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>
-                  </svg>
-                </button>
-              </header>
-
-              <PostMapPreview course={course}/>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
-                            padding: "12px 16px",
-                            borderTop: "1px solid var(--border-warm)",
-                            borderBottom: "1px solid var(--border-warm)",
-                            background: "var(--bg-cream)" }}>
-                {[
-                  { v: post.record.km.toFixed(2), u: "km",  k: "거리" },
-                  { v: `${min}:${String(sec).padStart(2, "0")}`, u: "", k: "시간" },
-                  { v: `${post.record.paceMin}'${String(post.record.paceSec).padStart(2, "0")}"`, u: "", k: "페이스" },
-                ].map((s, i) => (
-                  <div key={i} style={{ textAlign: "center", borderRight: i < 2 ? "1px solid var(--border-warm)" : "none", padding: "0 4px" }}>
-                    <div style={{ fontSize: 16, fontWeight: 800, color: "var(--text-1)",
-                                  letterSpacing: "-0.02em", lineHeight: 1.1 }}>
-                      {s.v}{s.u && <span style={{ fontSize: 10, color: "var(--text-3)", marginLeft: 2, fontWeight: 700 }}>{s.u}</span>}
-                    </div>
-                    <div style={{ fontSize: 10, color: "var(--text-3)", fontWeight: 600, marginTop: 3 }}>{s.k}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ padding: "12px 14px 14px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 8 }}>
-                  <button onClick={() => toggleLike(post.id)} style={{
-                    display: "inline-flex", alignItems: "center", gap: 6,
-                    background: "transparent", border: "none", padding: "4px 6px",
-                    cursor: "pointer", fontWeight: 700, fontSize: 13, fontFamily: "inherit",
-                    color: "var(--text-1)",
-                  }}>
-                    <span style={{ fontSize: 18, transition: "transform 0.2s ease",
-                                   transform: userLiked ? "scale(1.12)" : "scale(1)" }}>
-                      {userLiked ? "💛" : "🤍"}
-                    </span>
-                    <span>{likeCount.toLocaleString()}</span>
-                  </button>
-                  <button style={{ display: "inline-flex", alignItems: "center", gap: 6,
-                                   background: "transparent", border: "none", padding: "4px 6px",
-                                   cursor: "pointer", color: "var(--text-2)", marginLeft: 4,
-                                   fontWeight: 700, fontSize: 13, fontFamily: "inherit" }}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                         stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12a8 8 0 0 1-12 7l-5 1 1-5a8 8 0 1 1 16-3z"/>
-                    </svg>
-                    <span>{post.comments.length}</span>
-                  </button>
-                  <div style={{ flex: 1 }}/>
-                  <button className={`smile ${favoriteSet.has(course.id) ? "is-on" : ""}`}
-                    onClick={() => toggleFavorite(course.id)}
-                    style={{ width: 32, height: 32 }} aria-label="즐겨찾기">
-                    <SmileFavorite on={favoriteSet.has(course.id)}/>
-                  </button>
-                </div>
-                <p style={{ margin: 0, color: "var(--text-1)", fontSize: 13.5,
-                            lineHeight: 1.5, fontWeight: 500 }}>
-                  <span style={{ fontWeight: 700, marginRight: 6 }}>{post.author.name}</span>
-                  {post.caption}
-                </p>
-                {post.comments.length > 0 && (
-                  <div style={{ marginTop: 8 }}>
-                    {post.comments.slice(0, 2).map((c, i) => (
-                      <div key={i} style={{ fontSize: 12.5, color: "var(--text-2)", lineHeight: 1.5 }}>
-                        <span style={{ fontWeight: 700, marginRight: 6 }}>{c.who}</span>{c.text}
-                      </div>
-                    ))}
-                    {post.comments.length > 2 && (
-                      <button style={{ background: "transparent", border: "none", padding: "4px 0",
-                                       color: "var(--text-3)", fontSize: 12, cursor: "pointer",
-                                       fontFamily: "inherit" }}>
-                        댓글 {post.comments.length}개 모두 보기
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </article>
-          );
-        })}
-      </div>
+      <div style={{ fontSize: 13.5, color: "var(--text-3)", fontWeight: 500 }}>준비 중이에요</div>
     </div>
   );
 }
@@ -559,7 +489,10 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
         {list.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10}}>
             {list.map(c => (
-              <button key={c.id} onClick={() => pickCourse(c.id)} style={{
+              <div key={c.id} role="button" tabIndex={0}
+                onClick={() => pickCourse(c.id)}
+                onKeyDown={e => e.key === "Enter" && pickCourse(c.id)}
+                style={{
                 background: "var(--bg-card)", borderRadius: 22,
                 border: "1px solid #F2EBDE", boxShadow: "var(--shadow-card)",
                 padding: 10, cursor: "pointer", textAlign: "left",
@@ -599,7 +532,7 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
                     <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)" }}>{c.minutes}분</span>
                   </div>
                 </div>
-              </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -628,37 +561,54 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
 }
 
 // ─── MeView ───────────────────────────────────────────────────────────────────
-function MeView({ favoriteCount, mineCount, totalKm }: {
+function MeView({ currentUser, favoriteCount, mineCount, totalKm, onRenameUser }: {
+  currentUser: { displayName: string; avatarColors: [string, string] };
   favoriteCount: number; mineCount: number; totalKm: number;
+  onRenameUser: (name: string) => Promise<void>;
 }) {
+  const [nicknameEdit, setNicknameEdit] = useState(false);
+  const [draft, setDraft] = useState(currentUser.displayName);
+  const [saving, setSaving] = useState(false);
+
+  const handleNicknameSave = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === currentUser.displayName) { setNicknameEdit(false); return; }
+    setSaving(true);
+    await onRenameUser(trimmed);
+    setSaving(false);
+    setNicknameEdit(false);
+  };
+
   const stats = [
     { v: mineCount, k: "만든 코스" },
     { v: favoriteCount, k: "즐겨찾기" },
     { v: `${totalKm.toFixed(1)}km`, k: "내 코스 합" },
   ];
-  const actions = [
-    { icon: "🎒", label: "내가 만든 코스",       sub: `${mineCount}개`,     color: "mint"  },
-    { icon: "😊", label: "즐겨찾기",             sub: `${favoriteCount}개`, color: "yellow"},
-    { icon: "📤", label: "코스 내보내기 (GPX)",   sub: "준비중",             color: "sky"   },
-    { icon: "🔗", label: "공유 링크로 가져오기",  sub: "준비중",             color: "pink"  },
-    { icon: "📝", label: "닉네임 정하기",         sub: "이름없는 러너",       color: "lilac" },
+  const menuItems = [
+    { icon: "🎒", label: "내가 만든 코스",      sub: `${mineCount}개`,     color: "mint"  },
+    { icon: "😊", label: "즐겨찾기",            sub: `${favoriteCount}개`, color: "yellow"},
+    { icon: "📤", label: "코스 내보내기 (GPX)", sub: "준비중",             color: "sky"   },
+    { icon: "🔗", label: "공유 링크로 가져오기", sub: "준비중",             color: "pink"  },
   ];
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "10px 18px 110px" }}>
+      {/* 프로필 카드 */}
       <div style={{ background: "var(--bg-card)", borderRadius: 24,
                     border: "1px solid #F2EBDE", boxShadow: "var(--shadow-card)", padding: 18 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ width: 64, height: 64, borderRadius: 999,
-                        background: "linear-gradient(135deg, #FFE38C, #FFC9D0)",
+          <div style={{ width: 64, height: 64, borderRadius: 999, flexShrink: 0,
+                        background: `linear-gradient(135deg, ${currentUser.avatarColors[0]}, ${currentUser.avatarColors[1]})`,
                         border: "3px solid #fff",
                         boxShadow: "0 0 0 2px var(--border-warm), 0 6px 12px -4px rgba(120,90,60,0.18)",
                         display: "flex", alignItems: "center", justifyContent: "center",
                         fontSize: 28 }}>🐣</div>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text-1)" }}>이름없는 러너</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "var(--text-1)" }}>
+              {currentUser.displayName}
+            </div>
             <div style={{ fontSize: 12.5, color: "var(--text-3)", marginTop: 3, lineHeight: 1.4 }}>
-              로그인 없이 시작했어요<br/>이 브라우저에만 저장됩니다 🔐
+              로그인 없이 시작했어요<br/>서버에 임시 저장 중이에요 🌿
             </div>
           </div>
         </div>
@@ -673,15 +623,71 @@ function MeView({ favoriteCount, mineCount, totalKm }: {
         </div>
       </div>
 
+      {/* 닉네임 변경 */}
       <div style={{ background: "var(--bg-card)", borderRadius: 22, marginTop: 14,
                     border: "1px solid #F2EBDE", overflow: "hidden" }}>
-        {actions.map((r, i) => (
+        {nicknameEdit ? (
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text-2)" }}>닉네임 변경</div>
+            <input
+              value={draft}
+              onChange={e => setDraft(e.target.value.slice(0, 20))}
+              onKeyDown={e => { if (e.key === "Enter") { void handleNicknameSave(); } if (e.key === "Escape") setNicknameEdit(false); }}
+              autoFocus
+              maxLength={20}
+              placeholder="닉네임 입력 (최대 20자)"
+              style={{
+                height: 44, borderRadius: 12, border: "1.5px solid var(--border-warm)",
+                padding: "0 14px", fontSize: 14, fontFamily: "inherit",
+                background: "var(--bg-cream)", color: "var(--text-1)", outline: "none",
+                fontWeight: 600,
+              }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setNicknameEdit(false)} style={{
+                flex: 1, height: 40, borderRadius: 12, border: "1.5px solid var(--border-warm)",
+                background: "transparent", fontWeight: 700, fontSize: 13.5,
+                color: "var(--text-2)", fontFamily: "inherit", cursor: "pointer",
+              }}>취소</button>
+              <button onClick={() => void handleNicknameSave()} disabled={saving} style={{
+                flex: 2, height: 40, borderRadius: 12, border: "none",
+                background: "var(--mint)", fontWeight: 800, fontSize: 13.5,
+                color: "var(--text-1)", fontFamily: "inherit", cursor: "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}>{saving ? "저장 중…" : "저장하기"}</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setDraft(currentUser.displayName); setNicknameEdit(true); }} style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "14px 16px", width: "100%",
+            background: "transparent", border: "none", cursor: "pointer",
+            textAlign: "left", fontFamily: "inherit",
+          }}>
+            <div style={{ width: 36, height: 36, borderRadius: 12, background: "var(--lilac-soft)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 18 }}>📝</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--text-1)" }}>닉네임 변경하기</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-3)", marginTop: 2 }}>
+                {currentUser.displayName}
+              </div>
+            </div>
+            <IconChevronDown size={16} style={{ transform: "rotate(-90deg)" } as React.CSSProperties}/>
+          </button>
+        )}
+      </div>
+
+      {/* 메뉴 목록 */}
+      <div style={{ background: "var(--bg-card)", borderRadius: 22, marginTop: 14,
+                    border: "1px solid #F2EBDE", overflow: "hidden" }}>
+        {menuItems.map((r, i) => (
           <button key={i} style={{
             display: "flex", alignItems: "center", gap: 12,
             padding: "14px 16px", width: "100%",
             background: "transparent", border: "none", cursor: "pointer",
             textAlign: "left", fontFamily: "inherit",
-            borderBottom: i < actions.length - 1 ? "1px solid var(--border-warm)" : "none",
+            borderBottom: i < menuItems.length - 1 ? "1px solid var(--border-warm)" : "none",
           }}>
             <div style={{ width: 36, height: 36, borderRadius: 12,
                           background: `var(--${r.color}-soft)`,

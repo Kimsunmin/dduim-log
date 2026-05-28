@@ -1,120 +1,45 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Course, EntityId, UserProfile } from "./types";
-import { FAVORITE_KEY, MINE_KEY } from "./data";
+"use client";
 
-const STORE_KEY = "dduim:store:v1";
-const LIKED_POST_KEY = "dduim:liked:v1";
+import { useCallback, useEffect, useState } from "react";
+import type { Course, DduimAppState, EntityId } from "./types";
+
+// ─── 상수 ─────────────────────────────────────────────────────────────────────
 const STORE_VERSION = 1;
-const LOCAL_USER_ID = "local-runner";
+const UID_KEY = "dduim:uid:v1";
 
-export type DduimAppState = {
-  version: number;
-  currentUser: UserProfile;
-  userCourses: Course[];
-  savedCourseIds: EntityId[];
-  likedPostIds: EntityId[];
-  updatedAt: string;
-};
-
-export type DduimRepository = {
-  load(): DduimAppState;
-  save(state: DduimAppState): void;
-};
-
-const now = () => new Date().toISOString();
-
-const localUser = (timestamp = now()): UserProfile => ({
-  id: LOCAL_USER_ID,
-  displayName: "이름없는 러너",
-  avatarColors: ["#FFE38C", "#FFC9D0"],
-  createdAt: timestamp,
-  updatedAt: timestamp,
-});
-
-const emptyState = (): DduimAppState => {
-  const timestamp = now();
-  return {
-    version: STORE_VERSION,
-    currentUser: localUser(timestamp),
-    userCourses: [],
-    savedCourseIds: [],
-    likedPostIds: [],
-    updatedAt: timestamp,
-  };
-};
-
-function readJson<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const value = window.localStorage.getItem(key);
-    return value ? (JSON.parse(value) as T) : fallback;
-  } catch {
-    return fallback;
+// ─── UID: localStorage 에 UUID 만 보관 ───────────────────────────────────────
+function getOrCreateUserId(): string {
+  if (typeof window === "undefined") return "ssr";
+  let id = window.localStorage.getItem(UID_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    window.localStorage.setItem(UID_KEY, id);
   }
+  return id;
 }
 
-function normalizeState(input: Partial<DduimAppState>): DduimAppState {
-  const fallback = emptyState();
-  const timestamp = input.updatedAt || fallback.updatedAt;
-
+// ─── 초기 빈 상태 ─────────────────────────────────────────────────────────────
+function makeEmptyState(userId: string): DduimAppState {
+  const ts = new Date().toISOString();
   return {
     version: STORE_VERSION,
     currentUser: {
-      ...fallback.currentUser,
-      ...input.currentUser,
-      id: input.currentUser?.id || LOCAL_USER_ID,
-      updatedAt: input.currentUser?.updatedAt || timestamp,
+      id: userId,
+      displayName: "이름없는 러너",
+      avatarColors: ["#FFE38C", "#FFC9D0"],
+      createdAt: ts,
+      updatedAt: ts,
     },
-    userCourses: (input.userCourses || []).map(course => ({
-      ...course,
-      mine: true,
-      ownerId: course.ownerId || LOCAL_USER_ID,
-      visibility: course.visibility || "private",
-      source: course.source || "user",
-      createdAt: course.createdAt || timestamp,
-      updatedAt: course.updatedAt || timestamp,
-      deletedAt: course.deletedAt ?? null,
-    })),
-    savedCourseIds: Array.from(new Set(input.savedCourseIds || [])),
-    likedPostIds: Array.from(new Set(input.likedPostIds || [])),
-    updatedAt: timestamp,
+    userCourses: [],
+    savedCourseIds: [],
+    likedPostIds: [],
+    updatedAt: ts,
   };
 }
 
-class LocalDduimRepository implements DduimRepository {
-  load(): DduimAppState {
-    if (typeof window === "undefined") return emptyState();
-
-    const stored = readJson<Partial<DduimAppState> | null>(STORE_KEY, null);
-    if (stored) return normalizeState(stored);
-
-    const migrated = normalizeState({
-      userCourses: readJson<Course[]>(MINE_KEY, []),
-      savedCourseIds: readJson<EntityId[]>(FAVORITE_KEY, []),
-      likedPostIds: readJson<EntityId[]>(LIKED_POST_KEY, []),
-    });
-    this.save(migrated);
-    return migrated;
-  }
-
-  save(state: DduimAppState): void {
-    if (typeof window === "undefined") return;
-
-    const normalized = normalizeState({ ...state, updatedAt: now() });
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(normalized));
-
-    // Keep legacy keys in sync during the prototype phase so old UI state survives refactors.
-    window.localStorage.setItem(MINE_KEY, JSON.stringify(normalized.userCourses));
-    window.localStorage.setItem(FAVORITE_KEY, JSON.stringify(normalized.savedCourseIds));
-    window.localStorage.setItem(LIKED_POST_KEY, JSON.stringify(normalized.likedPostIds));
-  }
-}
-
-export const dduimRepository: DduimRepository = new LocalDduimRepository();
-
-export function prepareUserCourse(course: Course, userId = LOCAL_USER_ID): Course {
-  const timestamp = now();
-
+// ─── 코스 저장 준비 ───────────────────────────────────────────────────────────
+export function prepareUserCourse(course: Course, userId: string): Course {
+  const timestamp = new Date().toISOString();
   return {
     ...course,
     mine: true,
@@ -127,59 +52,78 @@ export function prepareUserCourse(course: Course, userId = LOCAL_USER_ID): Cours
   };
 }
 
-export function useDduimStore(repository: DduimRepository = dduimRepository) {
-  const [state, setState] = useState<DduimAppState>(() => emptyState());
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+export function useDduimStore() {
+  // UID는 컴포넌트 생명주기 동안 불변
+  const [uid] = useState<string>(() => getOrCreateUserId());
+
+  const [state, setState] = useState<DduimAppState>(() => makeEmptyState(uid));
   const [ready, setReady] = useState(false);
 
+  // 최초 마운트: 서버에서 상태 로드
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setState(repository.load());
-      setReady(true);
-    }, 0);
+    fetch(`/api/state?uid=${encodeURIComponent(uid)}`)
+      .then(r => r.json() as Promise<DduimAppState>)
+      .then(s => { setState(s); setReady(true); })
+      .catch(() => { setState(makeEmptyState(uid)); setReady(true); });
+  }, [uid]);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [repository]);
+  // 서버 동기화 (fire-and-forget)
+  const syncToServer = useCallback((next: DduimAppState) => {
+    fetch("/api/state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, state: next }),
+    }).catch(() => {});
+  }, [uid]);
 
+  // 낙관적 업데이트 + 비동기 서버 저장
   const commit = useCallback((update: (prev: DduimAppState) => DduimAppState) => {
     setState(prev => {
-      const next = normalizeState(update(prev));
-      repository.save(next);
+      const next = { ...update(prev), updatedAt: new Date().toISOString() };
+      syncToServer(next);
       return next;
     });
-  }, [repository]);
+  }, [syncToServer]);
 
-  const actions = useMemo(() => ({
-    saveUserCourse(course: Course) {
-      commit(prev => ({
-        ...prev,
-        userCourses: [
-          prepareUserCourse(course, prev.currentUser.id),
-          ...prev.userCourses.filter(item => item.id !== course.id),
-        ],
-      }));
-    },
-    toggleSavedCourse(courseId: EntityId) {
-      let saved = false;
-      commit(prev => {
-        saved = !prev.savedCourseIds.includes(courseId);
-        return {
-          ...prev,
-          savedCourseIds: saved
-            ? [...prev.savedCourseIds, courseId]
-            : prev.savedCourseIds.filter(id => id !== courseId),
-        };
+  const actions = {
+    // 코스 생성: 서버에서 10개 제한 검사
+    async saveUserCourse(course: Course): Promise<{ limitReached?: boolean }> {
+      const prepared = prepareUserCourse(course, uid);
+      const res = await fetch("/api/courses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, course: prepared }),
       });
-      return saved;
+      if (res.status === 429) return { limitReached: true };
+      const newState = (await res.json()) as DduimAppState;
+      setState(newState);
+      return {};
     },
-    toggleLikedPost(postId: EntityId) {
+
+    // 즐겨찾기 토글 (낙관적 업데이트)
+    toggleSavedCourse(courseId: EntityId): boolean {
+      const isSaved = !state.savedCourseIds.includes(courseId);
       commit(prev => ({
         ...prev,
-        likedPostIds: prev.likedPostIds.includes(postId)
-          ? prev.likedPostIds.filter(id => id !== postId)
-          : [...prev.likedPostIds, postId],
+        savedCourseIds: isSaved
+          ? [...prev.savedCourseIds, courseId]
+          : prev.savedCourseIds.filter(id => id !== courseId),
       }));
+      return isSaved;
     },
-  }), [commit]);
 
-  return { ...state, ready, actions };
+    // 닉네임 변경
+    async updateDisplayName(name: string): Promise<void> {
+      const res = await fetch("/api/user", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, displayName: name }),
+      });
+      const newState = (await res.json()) as DduimAppState;
+      setState(newState);
+    },
+  };
+
+  return { ...state, uid, ready, actions };
 }

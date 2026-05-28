@@ -43,3 +43,6 @@ next-env.d.ts
 
 # My docs
 /.docs
+
+# Debug agent
+/.playwright-mcp

@@ -2,9 +2,10 @@ import type { Course } from "@/lib/dduim/types";
 import { MiniMap } from "./MiniMap";
 import { SmileFavorite } from "./icons";
 
-export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave }: {
+export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, onShare }: {
   course: Course; isActive: boolean; isSaved: boolean;
   onClick: () => void; onToggleSave: (id: string) => void;
+  onShare?: () => void;
 }) {
   return (
     <article className={`course-card ${isActive ? "is-active" : ""}`} onClick={onClick}>
@@ -42,6 +43,21 @@ export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave }:
           </span>
           <span className="dot-divider"/>
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)" }}>{course.minutes}분</span>
+          {onShare && (
+            <button
+              onClick={e => { e.stopPropagation(); onShare(); }}
+              aria-label="링크 복사"
+              style={{ marginLeft: "auto", display: "flex", alignItems: "center", justifyContent: "center",
+                       width: 28, height: 28, borderRadius: 999, border: "none",
+                       background: "transparent", cursor: "pointer", color: "var(--text-3)",
+                       flexShrink: 0 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                   strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </article>

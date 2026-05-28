@@ -97,3 +97,12 @@ export type Post = {
   userId?: EntityId;
   createdAt?: ISODateString;
 };
+
+export type DduimAppState = {
+  version: number;
+  currentUser: UserProfile;
+  userCourses: Course[];
+  savedCourseIds: EntityId[];
+  likedPostIds: EntityId[];
+  updatedAt: ISODateString;
+};
