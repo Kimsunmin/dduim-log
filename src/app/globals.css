@@ -254,6 +254,54 @@ button { cursor: pointer; }
   z-index: 12;
 }
 
+.kakao-course-pin {
+  align-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px -1px rgba(60, 50, 40, 0.18);
+  color: var(--text-1);
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  height: 30px;
+  justify-content: center;
+  min-width: 46px;
+  padding: 0 10px;
+  position: relative;
+  transform: scale(1);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  white-space: nowrap;
+}
+
+.kakao-course-pin small {
+  font-size: 9px;
+  margin-left: 1px;
+  opacity: 0.7;
+}
+
+.kakao-course-pin i {
+  align-items: center;
+  background: var(--text-1);
+  border: 1.5px solid #fff;
+  border-radius: 999px;
+  color: #fff;
+  display: flex;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 800;
+  height: 14px;
+  justify-content: center;
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  width: 14px;
+}
+
+.kakao-course-pin.is-active {
+  box-shadow: 0 4px 10px -2px rgba(60, 50, 40, 0.28);
+  transform: scale(1.18);
+}
+
 .user-dot {
   animation: pulse-ring 2.6s ease-out infinite;
   background: #2d7df6;

@@ -2,8 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Course } from "@/lib/dduim/types";
-import { COLOR_INK } from "@/lib/dduim/data";
-import { loadKakaoMap, type KakaoMap, type KakaoMarker, type KakaoPolyline } from "@/lib/kakao/load-kakao-map";
+import { COLOR_INK, COLOR_MID } from "@/lib/dduim/data";
+import {
+  loadKakaoMap,
+  type KakaoCustomOverlay,
+  type KakaoMap,
+  type KakaoPolyline,
+} from "@/lib/kakao/load-kakao-map";
 import { MapView } from "./MapView";
 import { ShoePins } from "./ShoePins";
 
@@ -18,7 +23,7 @@ const DEFAULT_CENTER = { lat: 37.52693, lng: 126.93447 };
 export function KakaoMapView({ courses, activeId, onPick }: KakaoMapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<KakaoMap | null>(null);
-  const markerRefs = useRef<KakaoMarker[]>([]);
+  const overlayRefs = useRef<KakaoCustomOverlay[]>([]);
   const polylineRef = useRef<KakaoPolyline | null>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -53,8 +58,8 @@ export function KakaoMapView({ courses, activeId, onPick }: KakaoMapViewProps) {
 
     return () => {
       cancelled = true;
-      markerRefs.current.forEach((marker) => marker.setMap(null));
-      markerRefs.current = [];
+      overlayRefs.current.forEach((overlay) => overlay.setMap(null));
+      overlayRefs.current = [];
       polylineRef.current?.setMap(null);
       polylineRef.current = null;
     };
@@ -68,22 +73,27 @@ export function KakaoMapView({ courses, activeId, onPick }: KakaoMapViewProps) {
     loadKakaoMap().then((maps) => {
       if (!alive || !mapRef.current) return;
 
-      markerRefs.current.forEach((marker) => marker.setMap(null));
-      markerRefs.current = geoCourses.map((course) => {
-        const marker = new maps.Marker({
+      overlayRefs.current.forEach((overlay) => overlay.setMap(null));
+      overlayRefs.current = geoCourses.map((course) => {
+        const isActive = course.id === activeId;
+        const content = createCourseOverlayElement(course, isActive, () => onPick(course.id));
+        const overlay = new maps.CustomOverlay({
+          clickable: true,
+          content,
           map: mapRef.current!,
           position: new maps.LatLng(course.startPoint!.lat, course.startPoint!.lng),
+          xAnchor: 0.5,
+          yAnchor: 0.5,
+          zIndex: isActive ? 30 : 20,
         });
-
-        maps.event.addListener(marker, "click", () => onPick(course.id));
-        return marker;
+        return overlay;
       });
     });
 
     return () => {
       alive = false;
     };
-  }, [geoCourses, onPick, ready]);
+  }, [activeId, geoCourses, onPick, ready]);
 
   useEffect(() => {
     if (!ready || !mapRef.current) return;
@@ -142,4 +152,32 @@ export function KakaoMapView({ courses, activeId, onPick }: KakaoMapViewProps) {
       )}
     </div>
   );
+}
+
+function createCourseOverlayElement(course: Course, isActive: boolean, onClick: () => void) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `kakao-course-pin ${isActive ? "is-active" : ""}`;
+  button.style.background = isActive ? "var(--yellow)" : COLOR_MID[course.color];
+  button.setAttribute("aria-label", `${course.title} 선택`);
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+
+  const distance = document.createElement("span");
+  distance.textContent = course.distance.toFixed(1);
+  button.appendChild(distance);
+
+  const unit = document.createElement("small");
+  unit.textContent = "km";
+  button.appendChild(unit);
+
+  if (course.mine) {
+    const mine = document.createElement("i");
+    mine.textContent = "나";
+    button.appendChild(mine);
+  }
+
+  return button;
 }

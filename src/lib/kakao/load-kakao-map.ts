@@ -10,6 +10,15 @@ type KakaoMapsNamespace = {
     options: { center: KakaoLatLng; level: number },
   ) => KakaoMap;
   Marker: new (options: { map?: KakaoMap | null; position: KakaoLatLng }) => KakaoMarker;
+  CustomOverlay: new (options: {
+    clickable?: boolean;
+    content: HTMLElement | string;
+    map?: KakaoMap | null;
+    position: KakaoLatLng;
+    xAnchor?: number;
+    yAnchor?: number;
+    zIndex?: number;
+  }) => KakaoCustomOverlay;
   Polyline: new (options: {
     map?: KakaoMap | null;
     path: KakaoLatLng[];
@@ -32,6 +41,12 @@ export type KakaoMap = {
 
 export type KakaoMarker = {
   setMap(map: KakaoMap | null): void;
+};
+
+export type KakaoCustomOverlay = {
+  setMap(map: KakaoMap | null): void;
+  setPosition(position: KakaoLatLng): void;
+  setZIndex(zIndex: number): void;
 };
 
 export type KakaoPolyline = {
