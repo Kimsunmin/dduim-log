@@ -28,20 +28,11 @@ export const metadata: Metadata = {
     siteName: "뜀로그",
     title: "뜀로그 | dduim.log",
     description: "내 동네 러닝 코스를 그리고 공유하는 모바일 웹 플랫폼",
-    images: [
-      {
-        url: "/opengraph-image",
-        width: 800,
-        height: 400,
-        alt: "뜀로그",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "뜀로그 | dduim.log",
     description: "내 동네 러닝 코스를 그리고 공유하는 모바일 웹 플랫폼",
-    images: ["/opengraph-image"],
   },
 };
 

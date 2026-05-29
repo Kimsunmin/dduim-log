@@ -33,21 +33,6 @@ export default function OpenGraphImage() {
             inset: 0,
           }}
         >
-          <defs>
-            <pattern id="dots" width="30" height="30" patternUnits="userSpaceOnUse" x="8" y="8">
-              <circle cx="1.6" cy="1.6" r="1.6" fill="rgba(47,139,110,0.16)" />
-            </pattern>
-            <linearGradient id="fade" x1="0" y1="0" x2="800" y2="400" gradientUnits="userSpaceOnUse">
-              <stop offset="0" stopColor="white" stopOpacity="0.5" />
-              <stop offset="0.7" stopColor="white" stopOpacity="0" />
-            </linearGradient>
-            <mask id="dots-mask">
-              <rect width="800" height="400" fill="url(#fade)" />
-            </mask>
-          </defs>
-
-          <rect width="800" height="400" fill="url(#dots)" mask="url(#dots-mask)" />
-
           <path
             d="M-40 300 C 140 250, 200 360, 360 300 C 520 240, 600 330, 880 250"
             fill="none"
