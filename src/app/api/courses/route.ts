@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadState, saveState, COURSE_LIMIT } from "@/lib/server/memory-store";
+import { loadState, saveCourse } from "@/lib/server/store";
 import type { Course } from "@/lib/dduim/types";
 
 export async function POST(req: NextRequest) {
@@ -7,20 +7,8 @@ export async function POST(req: NextRequest) {
   const { uid, course } = body;
   if (!uid || !course) return NextResponse.json({ error: "uid and course required" }, { status: 400 });
 
-  const state = loadState(uid);
-  const activeCourses = state.userCourses.filter(c => !c.deletedAt);
+  const result = await saveCourse(uid, course);
+  if (result.limitReached) return NextResponse.json({ limitReached: true }, { status: 429 });
 
-  if (activeCourses.length >= COURSE_LIMIT) {
-    return NextResponse.json({ limitReached: true }, { status: 429 });
-  }
-
-  const updated = {
-    ...state,
-    userCourses: [
-      { ...course, mine: true, ownerId: uid },
-      ...state.userCourses.filter(c => c.id !== course.id),
-    ],
-  };
-  saveState(uid, updated);
-  return NextResponse.json(loadState(uid));
+  return NextResponse.json(await loadState(uid));
 }

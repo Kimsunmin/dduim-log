@@ -1,48 +1,98 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Course, SnapPosition } from "@/lib/dduim/types";
-import { AREAS, FILTER_OPTIONS, navItems } from "@/lib/dduim/data";
+import { AREAS, FILTER_OPTIONS, TAG_CATALOG, navItems } from "@/lib/dduim/data";
 import type { TabId } from "@/lib/dduim/data";
 import { useDduimStore } from "@/lib/dduim/store";
 import { BottomSheet } from "@/components/dduim/BottomSheet";
 import { CourseCard } from "@/components/dduim/CourseCard";
 import { DrawingMode } from "@/components/dduim/DrawingMode";
-import { IconBookmark, IconChevronDown, IconCompass, IconMap, IconPlus, IconSearch, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
+import { IconBookmark, IconChevronDown, IconCompass, IconMap, IconPlus, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
 import { KakaoMapView } from "@/components/dduim/KakaoMapView";
 import { MiniMap } from "@/components/dduim/MiniMap";
 import { MyCourseLines } from "@/components/dduim/MyCourseLines";
 
+function getCourseIdFromUrl() {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("c") ?? "";
+}
+
 export default function Home() {
   const [tab, setTab] = useState<TabId>("home");
-  const [activeId, setActiveId] = useState(() =>
-    typeof window !== "undefined"
-      ? (new URLSearchParams(window.location.search).get("c") ?? "")
-      : ""
-  );
+  const [activeId, setActiveId] = useState(() => getCourseIdFromUrl());
+  const [sharedCourseId, setSharedCourseId] = useState(() => getCourseIdFromUrl());
   const [filter, setFilter] = useState("전체");
   const [snap, setSnap] = useState<SnapPosition>("mid");
   const [drawingOpen, setDrawingOpen] = useState(false);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; level: number }>({ lat: 37.52693, lng: 126.93447, level: 7 });
   const [toast, setToast] = useState("");
   const [limitModal, setLimitModal] = useState(false);
-  const { userCourses, savedCourseIds, currentUser, actions } = useDduimStore();
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [distRange, setDistRange] = useState<"" | "short" | "mid" | "long">("");
+  const [editingCourse, setEditingCourse] = useState<Course | null>(null);
+  const { userCourses, publicCourses, savedCourseIds, currentUser, ready, actions } = useDduimStore();
+  const sharedCourseHandledRef = useRef(false);
 
-  const courses = useMemo(() => [...userCourses], [userCourses]);
+  const courses = useMemo(() => {
+    const mine = new Set(userCourses.map(c => c.id));
+    return [...userCourses, ...publicCourses.filter(c => !mine.has(c.id))];
+  }, [userCourses, publicCourses]);
   const favoriteSet = useMemo(() => new Set(savedCourseIds), [savedCourseIds]);
   const visibleCourses = useMemo(() => {
-    if (filter === "전체") return courses;
-    return courses.filter(c => c.tags.some(t => t.text === filter));
-  }, [courses, filter]);
+    let result = courses;
+    if (onlyMine) result = result.filter(c => c.mine);
+    if (distRange === "short") result = result.filter(c => c.distance <= 3);
+    else if (distRange === "mid") result = result.filter(c => c.distance > 3 && c.distance <= 7);
+    else if (distRange === "long") result = result.filter(c => c.distance > 7);
+    if (filter !== "전체") result = result.filter(c => c.tags.some(t => t.text === filter));
+    return result;
+  }, [courses, filter, onlyMine, distRange]);
   const orderedCourses = useMemo(() =>
     [...visibleCourses].sort((a, b) => a.id === activeId ? -1 : b.id === activeId ? 1 : 0),
     [activeId, visibleCourses]);
   const activeCourse = courses.find(c => c.id === activeId);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(""), 1600);
-  };
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const courseId = getCourseIdFromUrl();
+      sharedCourseHandledRef.current = false;
+      setSharedCourseId(courseId);
+      setActiveId(courseId);
+      if (courseId) {
+        setTab("home");
+        setSnap("mid");
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!sharedCourseId || sharedCourseHandledRef.current) return;
+
+    if (activeCourse) {
+      sharedCourseHandledRef.current = true;
+      window.setTimeout(() => {
+        setTab("home");
+        setActiveId(sharedCourseId);
+        setSnap("mid");
+        showToast("공유 코스를 열었어요");
+      }, 0);
+      return;
+    }
+
+    if (ready) {
+      sharedCourseHandledRef.current = true;
+      window.setTimeout(() => showToast("코스를 찾지 못했어요"), 0);
+    }
+  }, [activeCourse, ready, sharedCourseId, showToast]);
 
   const toggleFavorite = (id: string) => {
     const isSaved = actions.toggleSavedCourse(id);
@@ -60,9 +110,26 @@ export default function Home() {
 
   const pickCourse = (id: string) => { setActiveId(id); setTab("home"); setSnap("peek"); };
 
-  const shareCourse = (id: string) => {
+  const shareCourse = async (id: string) => {
+    const course = courses.find(c => c.id === id);
     const url = `${window.location.origin}/?c=${encodeURIComponent(id)}`;
-    navigator.clipboard.writeText(url).then(() => showToast("링크를 복사했어요 📋"));
+    const title = course ? `뜀로그 - ${course.title}` : "뜀로그 코스";
+    const text = course
+      ? `${course.title} · ${course.distance.toFixed(1)}km 코스`
+      : "뜀로그에서 코스를 확인해보세요";
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text, url });
+        showToast("공유창을 열었어요");
+        return;
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+
+    const copied = await copyTextToClipboard(url);
+    showToast(copied ? "링크를 복사했어요" : "링크 복사에 실패했어요");
   };
 
   return (
@@ -77,6 +144,8 @@ export default function Home() {
             visibleCourses={visibleCourses} snap={snap} setSnap={setSnap}
             onCenterChange={setMapCenter}
             onShare={shareCourse}
+            onlyMine={onlyMine} setOnlyMine={setOnlyMine}
+            distRange={distRange} setDistRange={setDistRange}
           />
         )}
         {tab === "feed" && (
@@ -84,7 +153,8 @@ export default function Home() {
         )}
         {tab === "saves" && (
           <SavesView courses={courses} favoriteSet={favoriteSet}
-            toggleFavorite={toggleFavorite} pickCourse={pickCourse}/>
+            toggleFavorite={toggleFavorite} pickCourse={pickCourse}
+            onEditCourse={c => setEditingCourse(c)}/>
         )}
         {tab === "me" && (
           <MeView
@@ -100,6 +170,18 @@ export default function Home() {
           <button className="fab" aria-label="새 코스 그리기" onClick={() => setDrawingOpen(true)}>
             <IconPlus size={24} color="#FDFCF8"/>
           </button>
+        )}
+
+        {editingCourse && (
+          <EditCourseSheet
+            course={editingCourse}
+            onClose={() => setEditingCourse(null)}
+            onSave={async (patch) => {
+              await actions.updateCourse(editingCourse.id, patch);
+              setEditingCourse(null);
+              showToast("코스를 수정했어요 ✏️");
+            }}
+          />
         )}
 
         <nav className="bottom-nav" aria-label="주요 메뉴">
@@ -171,8 +253,39 @@ export default function Home() {
 }
 
 // ─── ExploreView ──────────────────────────────────────────────────────────────
+async function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fallback below handles browsers that block async clipboard access.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
+type DistRange = "" | "short" | "mid" | "long";
+
 function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
-  orderedCourses, setActiveId, setFilter, toggleFavorite, visibleCourses, snap, setSnap, onCenterChange, onShare }: {
+  orderedCourses, setActiveId, setFilter, toggleFavorite, visibleCourses, snap, setSnap,
+  onCenterChange, onShare, onlyMine, setOnlyMine, distRange, setDistRange }: {
   activeCourse?: Course; activeId: string; courses: Course[];
   favoriteSet: Set<string>; filter: string; orderedCourses: Course[];
   setActiveId: (id: string) => void; setFilter: (f: string) => void;
@@ -180,11 +293,15 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
   snap: SnapPosition; setSnap: (s: SnapPosition) => void;
   onCenterChange?: (center: { lat: number; lng: number; level: number }) => void;
   onShare?: (id: string) => void;
+  onlyMine: boolean; setOnlyMine: (v: boolean) => void;
+  distRange: DistRange; setDistRange: (v: DistRange) => void;
 }) {
   const [areaId, setAreaId] = useState("all");
   const [areaOpen, setAreaOpen] = useState(false);
   const [expandedRegion, setExpandedRegion] = useState<string | null>(null);
   const [panTarget, setPanTarget] = useState<{ lat: number; lng: number; level: number } | undefined>(undefined);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const activeFilterCount = (onlyMine ? 1 : 0) + (distRange ? 1 : 0) + (filter !== "전체" ? 1 : 0);
   const areaRef = useRef<HTMLDivElement>(null);
 
   const areaLabel = (() => {
@@ -333,19 +450,97 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
             )}
           </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="search-pill" style={{ height: 38, padding: "0 14px", marginTop: 0 }}>
-              <IconSearch size={16} color="#8B7F76"/>
-              <input placeholder="코스 · 태그 검색"/>
-            </div>
-          </div>
+          <div style={{ flex: 1 }}/>
+
+          {/* 필터 버튼 */}
+          <button
+            onClick={() => setFilterOpen(o => !o)}
+            style={{
+              flexShrink: 0, display: "flex", alignItems: "center", gap: 5,
+              background: (filterOpen || activeFilterCount > 0) ? "var(--text-1)" : "var(--bg-soft)",
+              color: (filterOpen || activeFilterCount > 0) ? "var(--bg-cream)" : "var(--text-2)",
+              border: "1px solid",
+              borderColor: (filterOpen || activeFilterCount > 0) ? "var(--text-1)" : "var(--border-warm)",
+              borderRadius: 999, height: 30, padding: "0 11px",
+              fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              transition: "background 0.15s, color 0.15s, border-color 0.15s",
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 20 20" fill="none"
+                 stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="5" x2="17" y2="5"/>
+              <line x1="3" y1="10" x2="17" y2="10"/>
+              <line x1="3" y1="15" x2="17" y2="15"/>
+              <circle cx="7" cy="5" r="2" fill="currentColor" stroke="none"/>
+              <circle cx="13" cy="10" r="2" fill="currentColor" stroke="none"/>
+              <circle cx="8" cy="15" r="2" fill="currentColor" stroke="none"/>
+            </svg>
+            필터
+            {activeFilterCount > 0 && (
+              <span style={{
+                background: "var(--mint-deep)", color: "#fff",
+                borderRadius: 999, fontSize: 10, fontWeight: 800,
+                padding: "1px 5px", lineHeight: "1.5", marginLeft: 1,
+              }}>{activeFilterCount}</span>
+            )}
+            <IconChevronDown size={12} style={{
+              transition: "transform 0.2s ease",
+              transform: filterOpen ? "rotate(180deg)" : "rotate(0)",
+            } as React.CSSProperties}/>
+          </button>
         </div>
 
-        <div className="chips no-scrollbar" style={{ marginTop: 10 }}>
-          {FILTER_OPTIONS.map(f => (
-            <button key={f} className={`chip ${filter === f ? "is-active" : ""}`}
-              onClick={() => setFilter(f)}>{f === "전체" ? f : `#${f}`}</button>
-          ))}
+        {/* 오버레이 필터 드로어 — 레이아웃 부종 없음 */}
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0,
+          background: "var(--bg-card)",
+          borderBottom: "1px solid var(--border-warm)",
+          boxShadow: "0 8px 24px -4px rgba(60,40,20,0.15)",
+          zIndex: 45,
+          overflow: "hidden",
+          maxHeight: filterOpen ? 400 : 0,
+          transition: "max-height 0.26s cubic-bezier(0.4,0,0.2,1)",
+        }}>
+          <div style={{ padding: "14px 18px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* 내 코스 */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>보기</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  className={`chip ${onlyMine ? "is-mine" : ""}`}
+                  onClick={() => setOnlyMine(!onlyMine)}
+                >
+                  내 코스만
+                </button>
+              </div>
+            </div>
+
+            {/* 거리 */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>거리</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {(["short", "mid", "long"] as DistRange[]).map((key, i) => (
+                  <button key={key}
+                    className={`chip ${distRange === key ? "is-active" : ""}`}
+                    onClick={() => setDistRange(distRange === key ? "" : key)}
+                  >
+                    {["~3km", "3~7km", "7km+"][i]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 태그 */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>태그</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {FILTER_OPTIONS.map(f => (
+                  <button key={f} className={`chip ${filter === f ? "is-active" : ""}`}
+                    onClick={() => setFilter(f)}>{f === "전체" ? f : `#${f}`}</button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -425,9 +620,10 @@ function FeedView() {
 }
 
 // ─── SavesView ────────────────────────────────────────────────────────────────
-function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
+function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse, onEditCourse }: {
   courses: Course[]; favoriteSet: Set<string>;
   toggleFavorite: (id: string) => void; pickCourse: (id: string) => void;
+  onEditCourse?: (c: Course) => void;
 }) {
   const [seg, setSeg] = useState<"favs" | "mine">("favs");
   const sort = "최근";
@@ -489,16 +685,40 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
         {list.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10}}>
             {list.map(c => (
-              <div key={c.id} role="button" tabIndex={0}
-                onClick={() => pickCourse(c.id)}
-                onKeyDown={e => e.key === "Enter" && pickCourse(c.id)}
-                style={{
-                background: "var(--bg-card)", borderRadius: 22,
-                border: "1px solid #F2EBDE", boxShadow: "var(--shadow-card)",
-                padding: 10, cursor: "pointer", textAlign: "left",
-                position: "relative", display: "flex", flexDirection: "column",
-                fontFamily: "inherit", gap: 8,
-              }}>
+              <div key={c.id} style={{ position: "relative", paddingTop: c.mine && onEditCourse ? 14 : 0 }}>
+                {c.mine && onEditCourse && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onEditCourse(c); }}
+                    aria-label="코스 수정"
+                    style={{
+                      position: "absolute", top: 0, right: 0, zIndex: 2,
+                      width: 28, height: 28, borderRadius: 999,
+                      background: "var(--bg-card)",
+                      border: "1px solid var(--border-warm)",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.10)",
+                      cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      color: "var(--text-2)",
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" strokeWidth="2"
+                         strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/>
+                    </svg>
+                  </button>
+                )}
+                <div role="button" tabIndex={0}
+                  onClick={() => pickCourse(c.id)}
+                  onKeyDown={e => e.key === "Enter" && pickCourse(c.id)}
+                  style={{
+                  background: "var(--bg-card)", borderRadius: 22,
+                  border: "1px solid #F2EBDE", boxShadow: "var(--shadow-card)",
+                  padding: 10, cursor: "pointer", textAlign: "left",
+                  position: "relative", display: "flex", flexDirection: "column",
+                  fontFamily: "inherit", gap: 8,
+                }}>
                 <div style={{ position: "relative", borderRadius: 16, overflow: "hidden" }}>
                   <MiniMap path={c.path} color={c.color}/>
                   <button className={`smile ${favoriteSet.has(c.id) ? "is-on" : ""}`}
@@ -508,10 +728,11 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
                     <SmileFavorite on={favoriteSet.has(c.id)}/>
                   </button>
                   {c.mine && (
-                    <div style={{ position: "absolute", top: 6, left: 6,
-                                  background: "var(--text-1)", color: "#fff",
-                                  fontSize: 9, fontWeight: 800, padding: "3px 7px",
-                                  borderRadius: 999, letterSpacing: "0.02em" }}>내가 만든</div>
+                    <div style={{ position: "absolute", top: 6, left: 6 }}>
+                      <div style={{ background: "var(--text-1)", color: "#fff",
+                                    fontSize: 9, fontWeight: 800, padding: "3px 7px",
+                                    borderRadius: 999, letterSpacing: "0.02em" }}>내가 만든</div>
+                    </div>
                   )}
                 </div>
                 <div>
@@ -531,6 +752,7 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse }: {
                     <span className="dot-divider"/>
                     <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)" }}>{c.minutes}분</span>
                   </div>
+                </div>
                 </div>
               </div>
             ))}
@@ -709,5 +931,172 @@ function MeView({ currentUser, favoriteCount, mineCount, totalKm, onRenameUser }
         로그인 없이, 광고 없이, 부담 없이.
       </p>
     </div>
+  );
+}
+
+// ─── EditCourseSheet ──────────────────────────────────────────────────────────
+function EditCourseSheet({ course, onClose, onSave }: {
+  course: Course;
+  onClose: () => void;
+  onSave: (patch: { title?: string; tags?: Course["tags"]; visibility?: Course["visibility"] }) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(course.title);
+  const [selectedTags, setSelectedTags] = useState<Course["tags"]>(course.tags);
+  const [visibility, setVisibility] = useState<Course["visibility"]>(course.visibility ?? "private");
+  const [saving, setSaving] = useState(false);
+
+  const toggleTag = (tag: (typeof TAG_CATALOG)[number]) => {
+    const already = selectedTags.find(t => t.text === tag.text);
+    if (already) {
+      setSelectedTags(selectedTags.filter(t => t.text !== tag.text));
+    } else if (selectedTags.length < 3) {
+      setSelectedTags([...selectedTags, tag]);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!title.trim()) return;
+    setSaving(true);
+    await onSave({ title: title.trim(), tags: selectedTags, visibility });
+    setSaving(false);
+  };
+
+  return (
+    <>
+      {/* 배경 오버레이 */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed", inset: 0, background: "rgba(30,24,18,0.45)",
+          zIndex: 200, backdropFilter: "blur(2px)",
+        }}
+      />
+      {/* 바텀시트 패널 */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        background: "var(--bg-card)",
+        borderRadius: "28px 28px 0 0",
+        border: "1px solid var(--border-warm)",
+        boxShadow: "0 -8px 40px -8px rgba(60,40,20,0.2)",
+        zIndex: 201,
+        padding: "0 0 calc(env(safe-area-inset-bottom) + 16px)",
+        animation: "sheet-up 0.28s cubic-bezier(0.32,0.72,0.24,1)",
+        maxHeight: "85dvh",
+        overflowY: "auto",
+      }}>
+        {/* 핸들 */}
+        <div style={{ display: "flex", justifyContent: "center", padding: "12px 0 4px" }}>
+          <div style={{ width: 36, height: 4, borderRadius: 999, background: "var(--border-warm)" }}/>
+        </div>
+
+        {/* 헤더 */}
+        <div style={{ display: "flex", alignItems: "center", padding: "4px 20px 16px" }}>
+          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "var(--text-1)", flex: 1 }}>
+            코스 수정
+          </h2>
+          <button onClick={onClose} style={{
+            width: 32, height: 32, borderRadius: 999, border: "none",
+            background: "var(--bg-soft)", cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: "var(--text-3)", fontSize: 18, fontFamily: "inherit",
+          }}>×</button>
+        </div>
+
+        <div style={{ padding: "0 20px", display: "flex", flexDirection: "column", gap: 24 }}>
+          {/* 코스 이름 */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)",
+                            letterSpacing: "0.05em", textTransform: "uppercase",
+                            display: "block", marginBottom: 8 }}>코스 이름</label>
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value.slice(0, 30))}
+              placeholder="코스 이름을 입력하세요"
+              maxLength={30}
+              style={{
+                width: "100%", height: 48, borderRadius: 14,
+                border: "1.5px solid var(--border-warm)",
+                padding: "0 14px", fontSize: 15, fontFamily: "inherit",
+                background: "var(--bg-cream)", color: "var(--text-1)",
+                outline: "none", fontWeight: 600, boxSizing: "border-box",
+              }}
+            />
+          </div>
+
+          {/* 태그 */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)",
+                            letterSpacing: "0.05em", textTransform: "uppercase",
+                            display: "block", marginBottom: 4 }}>태그 (최대 3개)</label>
+            <p style={{ fontSize: 12, color: "var(--text-4)", margin: "0 0 10px" }}>
+              {selectedTags.length}/3 선택됨
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {TAG_CATALOG.map(tag => {
+                const active = selectedTags.some(t => t.text === tag.text);
+                const disabled = !active && selectedTags.length >= 3;
+                return (
+                  <button
+                    key={tag.text}
+                    onClick={() => toggleTag(tag)}
+                    disabled={disabled}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      height: 32, padding: "0 12px", borderRadius: 999,
+                      border: active ? "1.5px solid var(--mint-deep)" : "1px solid var(--border-warm)",
+                      background: active ? "var(--mint)" : "var(--bg-soft)",
+                      color: active ? "var(--mint-deep)" : disabled ? "var(--text-4)" : "var(--text-2)",
+                      fontSize: 13, fontWeight: 700, fontFamily: "inherit",
+                      cursor: disabled ? "default" : "pointer",
+                      opacity: disabled ? 0.45 : 1,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <span>{tag.emoji}</span>
+                    <span>#{tag.text}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 공개 여부 */}
+          <div>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)",
+                            letterSpacing: "0.05em", textTransform: "uppercase",
+                            display: "block", marginBottom: 8 }}>공개 여부</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {([["private", "🔒 나만 보기"], ["public", "🌍 전체 공개"]] as const).map(([val, label]) => (
+                <button key={val} onClick={() => setVisibility(val)} style={{
+                  flex: 1, height: 42, borderRadius: 14,
+                  border: visibility === val ? "1.5px solid var(--mint-deep)" : "1px solid var(--border-warm)",
+                  background: visibility === val ? "var(--mint)" : "var(--bg-soft)",
+                  color: visibility === val ? "var(--mint-deep)" : "var(--text-2)",
+                  fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", cursor: "pointer",
+                  transition: "all 0.15s",
+                }}>{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* 저장 버튼 */}
+          <button
+            onClick={() => void handleSave()}
+            disabled={saving || !title.trim()}
+            style={{
+              height: 52, borderRadius: 18, border: "none",
+              background: saving || !title.trim() ? "var(--border-warm)" : "var(--mint-deep)",
+              color: saving || !title.trim() ? "var(--text-3)" : "#fff",
+              fontSize: 15, fontWeight: 800, fontFamily: "inherit",
+              cursor: saving || !title.trim() ? "default" : "pointer",
+              transition: "background 0.15s, color 0.15s",
+              marginBottom: 4,
+            }}
+          >
+            {saving ? "저장 중…" : "저장하기"}
+          </button>
+        </div>
+      </div>
+    </>
   );
 }

@@ -2,10 +2,10 @@ import type { Course } from "@/lib/dduim/types";
 import { MiniMap } from "./MiniMap";
 import { SmileFavorite } from "./icons";
 
-export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, onShare }: {
+export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, onShare, onEdit }: {
   course: Course; isActive: boolean; isSaved: boolean;
   onClick: () => void; onToggleSave: (id: string) => void;
-  onShare?: () => void;
+  onShare?: () => void; onEdit?: () => void;
 }) {
   return (
     <article className={`course-card ${isActive ? "is-active" : ""}`} onClick={onClick}>
@@ -30,11 +30,31 @@ export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, o
               {course.title}
             </h3>
           </div>
-          <button className={`smile ${isSaved ? "is-on" : ""}`}
+          <button type="button" className={`smile ${isSaved ? "is-on" : ""}`}
             onClick={e => { e.stopPropagation(); onToggleSave(course.id); }}
             aria-label={isSaved ? "즐겨찾기 해제" : "즐겨찾기 추가"}>
             <SmileFavorite on={isSaved}/>
           </button>
+          {onEdit && course.mine && (
+            <button
+              type="button"
+              onClick={e => { e.stopPropagation(); onEdit(); }}
+              aria-label="코스 수정"
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 28, height: 28, borderRadius: 999, border: "none",
+                background: "transparent", cursor: "pointer",
+                color: "var(--text-3)", flexShrink: 0,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth="1.8"
+                   strokeLinecap="round" strokeLinejoin="round">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4z"/>
+              </svg>
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-3)" }}>
           <span style={{ fontSize: 13, fontWeight: 800, color: "var(--text-1)", letterSpacing: "-0.02em" }}>
@@ -45,8 +65,10 @@ export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, o
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-2)" }}>{course.minutes}분</span>
           {onShare && (
             <button
+              type="button"
+              onPointerDown={e => e.stopPropagation()}
               onClick={e => { e.stopPropagation(); onShare(); }}
-              aria-label="링크 복사"
+              aria-label="코스 공유"
               style={{ marginLeft: "auto", display: "flex", alignItems: "center", justifyContent: "center",
                        width: 28, height: 28, borderRadius: 999, border: "none",
                        background: "transparent", cursor: "pointer", color: "var(--text-3)",

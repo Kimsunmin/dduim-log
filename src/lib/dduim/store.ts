@@ -31,6 +31,7 @@ function makeEmptyState(userId: string): DduimAppState {
       updatedAt: ts,
     },
     userCourses: [],
+    publicCourses: [],
     savedCourseIds: [],
     likedPostIds: [],
     updatedAt: ts,
@@ -122,6 +123,27 @@ export function useDduimStore() {
       });
       const newState = (await res.json()) as DduimAppState;
       setState(newState);
+    },
+
+    // 코스 이름·태그·공개여부 수정
+    async updateCourse(
+      courseId: EntityId,
+      patch: { title?: string; tags?: Course["tags"]; visibility?: Course["visibility"] },
+    ): Promise<boolean> {
+      // 낙관적 업데이트
+      setState(prev => ({
+        ...prev,
+        userCourses: prev.userCourses.map(c =>
+          c.id === courseId ? { ...c, ...patch } : c,
+        ),
+        updatedAt: new Date().toISOString(),
+      }));
+      const res = await fetch(`/api/courses/${encodeURIComponent(courseId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, patch }),
+      });
+      return res.ok;
     },
   };
 

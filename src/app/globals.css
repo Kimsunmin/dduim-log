@@ -173,6 +173,21 @@ button { cursor: pointer; }
   color: var(--bg-cream);
 }
 
+.chip.is-mine {
+  background: var(--mint-deep);
+  border-color: var(--mint-deep);
+  color: #fff;
+}
+
+.chip-divider {
+  align-self: center;
+  background: var(--border-warm);
+  border-radius: 999px;
+  flex-shrink: 0;
+  height: 16px;
+  width: 1px;
+}
+
 .chip-tag {
   font-size: 11.5px;
   gap: 3px;
@@ -509,13 +524,13 @@ button { cursor: pointer; }
   color: var(--text-3);
   display: flex;
   flex-direction: column;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 800;
   gap: 2px;
-  height: 48px;
+  height: 42px;
   justify-content: center;
   transition: all 0.18s ease;
-  width: 56px;
+  width: 50px;
 }
 
 .nav-btn.is-active { background: var(--mint); color: var(--mint-ink); }
@@ -607,31 +622,6 @@ button { cursor: pointer; }
   position: relative;
 }
 
-.draw-line { inset: 0; pointer-events: none; position: absolute; }
-
-.waypoint {
-  background: #fff;
-  border: 3px solid var(--mint-deep);
-  border-radius: 999px;
-  box-shadow: 0 2px 6px rgba(60, 50, 40, 0.18);
-  height: 18px;
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 18px;
-}
-
-.waypoint.start {
-  align-items: center;
-  background: var(--mint-deep);
-  color: #fff;
-  display: flex;
-  font-size: 10px;
-  font-weight: 900;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
 .draw-hint {
   background: rgba(253, 252, 248, 0.95);
   border: 1px solid var(--border-warm);
@@ -646,17 +636,6 @@ button { cursor: pointer; }
   top: 32%;
   transform: translateX(-50%);
   white-space: nowrap;
-}
-
-.draw-dock {
-  align-items: flex-end;
-  background: var(--bg-card);
-  border-top: 1px solid var(--border-warm);
-  box-shadow: 0 -8px 24px -12px rgba(120, 90, 60, 0.18);
-  display: flex;
-  flex-shrink: 0;
-  gap: 14px;
-  padding: 14px 16px;
 }
 
 .details-form {
@@ -719,6 +698,11 @@ button { cursor: pointer; }
 @keyframes dropdown-in {
   0%   { opacity: 0; transform: translateY(-6px) scale(0.96); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes sheet-up {
+  0%   { transform: translateY(60px); opacity: 0.4; }
+  100% { transform: translateY(0);    opacity: 1;   }
 }
 
 @keyframes spin {

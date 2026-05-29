@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadState, saveState } from "@/lib/server/memory-store";
+import { loadState, updateUserProfile } from "@/lib/server/store";
 
 export async function PATCH(req: NextRequest) {
   const body = await req.json() as { uid?: string; displayName?: string };
@@ -9,15 +9,6 @@ export async function PATCH(req: NextRequest) {
   const name = String(displayName ?? "").trim().slice(0, 20);
   if (!name) return NextResponse.json({ error: "displayName required" }, { status: 400 });
 
-  const state = loadState(uid);
-  const updated = {
-    ...state,
-    currentUser: {
-      ...state.currentUser,
-      displayName: name,
-      updatedAt: new Date().toISOString(),
-    },
-  };
-  saveState(uid, updated);
-  return NextResponse.json(loadState(uid));
+  await updateUserProfile(uid, { displayName: name });
+  return NextResponse.json(await loadState(uid));
 }

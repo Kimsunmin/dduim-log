@@ -3,6 +3,10 @@ type KakaoLatLng = {
   getLng(): number;
 };
 
+type KakaoLatLngBounds = {
+  extend(position: KakaoLatLng): void;
+};
+
 type KakaoSize = object;
 type KakaoMarkerImage = object;
 
@@ -12,6 +16,7 @@ export type KakaoMouseEvent = {
 
 type KakaoMapsNamespace = {
   LatLng: new (lat: number, lng: number) => KakaoLatLng;
+  LatLngBounds: new () => KakaoLatLngBounds;
   Map: new (
     container: HTMLElement,
     options: { center: KakaoLatLng; level: number },
@@ -52,6 +57,7 @@ type KakaoMapsNamespace = {
 export type KakaoMap = {
   panTo(position: KakaoLatLng): void;
   setCenter(position: KakaoLatLng): void;
+  setBounds(bounds: KakaoLatLngBounds): void;
   getCenter(): KakaoLatLng;
   setLevel(level: number): void;
   getLevel(): number;

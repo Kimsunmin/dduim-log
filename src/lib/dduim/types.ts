@@ -102,6 +102,7 @@ export type DduimAppState = {
   version: number;
   currentUser: UserProfile;
   userCourses: Course[];
+  publicCourses: Course[];
   savedCourseIds: EntityId[];
   likedPostIds: EntityId[];
   updatedAt: ISODateString;

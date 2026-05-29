@@ -181,8 +181,14 @@ export function KakaoMapView({ courses, activeId, favoriteIds, onPick, panToLatL
         })
       );
 
-      const start = activeCourse.startPoint ?? activeCourse.geoPath[0];
-      mapRef.current.panTo(new maps.LatLng(start.lat, start.lng));
+      if (path.length > 1) {
+        const bounds = new maps.LatLngBounds();
+        path.forEach(point => bounds.extend(point));
+        mapRef.current.setBounds(bounds);
+      } else {
+        const start = activeCourse.startPoint ?? activeCourse.geoPath[0];
+        mapRef.current.panTo(new maps.LatLng(start.lat, start.lng));
+      }
     });
 
     return () => {

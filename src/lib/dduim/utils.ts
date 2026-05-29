@@ -76,6 +76,43 @@ export function deriveNormalizedPath(geoPoints: LatLngLiteral[]): NormalizedPoin
 }
 
 /** 두 좌표 간 Haversine 거리 (km) */
+export function smoothGeoPath(points: LatLngLiteral[], smoothness = 0.45): LatLngLiteral[] {
+  if (points.length < 3 || smoothness <= 0.02) return points;
+
+  const samplesPerSegment = Math.max(3, Math.round(4 + smoothness * 12));
+  const result: LatLngLiteral[] = [];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+
+    for (let step = 0; step < samplesPerSegment; step++) {
+      const t = step / samplesPerSegment;
+      result.push({
+        lat: catmullRom(p0.lat, p1.lat, p2.lat, p3.lat, t, smoothness),
+        lng: catmullRom(p0.lng, p1.lng, p2.lng, p3.lng, t, smoothness),
+      });
+    }
+  }
+
+  result.push(points[points.length - 1]);
+  return result;
+}
+
+function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number, tension: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const v0 = (p2 - p0) * tension;
+  const v1 = (p3 - p1) * tension;
+
+  return (2 * p1 - 2 * p2 + v0 + v1) * t3
+    + (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2
+    + v0 * t
+    + p1;
+}
+
 function segmentKm(a: LatLngLiteral, b: LatLngLiteral): number {
   const R = 6371;
   const toRad = (v: number) => v * Math.PI / 180;
