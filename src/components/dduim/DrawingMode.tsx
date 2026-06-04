@@ -418,7 +418,7 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
         </button>
         <div>
           <h1>{stage === "draw" ? "코스 그리기" : "코스 정보"}</h1>
-          <p>{stage === "draw" ? drawHint(controlPoints.length, returnEnabled) : "이름과 공개 설정만 정하면 끝이에요"}</p>
+          <p>{stage === "draw" ? drawHint(controlPoints.length, returnEnabled) : "이름만 정하면 내 코스로 저장돼요"}</p>
         </div>
       </div>
 
@@ -668,12 +668,12 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
 
             <div style={{ marginTop: 18 }}>
               <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)", display: "block", marginBottom: 8 }}>
-                공개 설정
+                저장 방식
               </label>
               <div style={{ display: "flex", gap: 8 }}>
-                {(["private", "public"] as CourseVisibility[]).map(v => {
+                {(["private"] as CourseVisibility[]).map(v => {
                   const isActive = visibility === v;
-                  const label = v === "private" ? "나만 보기" : "공유하기";
+                  const label = "나만 보기";
                   return (
                     <button key={v} onClick={() => setVisibility(v)} style={{
                       flex: 1, height: 44, borderRadius: 14, cursor: "pointer",
@@ -705,7 +705,7 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
               color: "#fff", border: "none", cursor: "pointer",
               fontWeight: 800, fontSize: 15, fontFamily: "inherit", letterSpacing: "-0.01em",
               boxShadow: "0 6px 16px -6px rgba(47, 139, 110, 0.5)",
-            }}>{visibility === "private" ? "나만의 코스로 저장" : "저장하고 공유하기"}</button>
+            }}>나만의 코스로 저장</button>
           </div>
         </>
       )}

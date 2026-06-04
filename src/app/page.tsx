@@ -8,7 +8,7 @@ import { useDduimStore } from "@/lib/dduim/store";
 import { BottomSheet } from "@/components/dduim/BottomSheet";
 import { CourseCard } from "@/components/dduim/CourseCard";
 import { DrawingMode } from "@/components/dduim/DrawingMode";
-import { IconBookmark, IconChevronDown, IconCompass, IconMap, IconPlus, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
+import { IconBookmark, IconChevronDown, IconMap, IconPlus, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
 import { OsmMapView } from "@/components/dduim/OsmMapView";
 import { MiniMap } from "@/components/dduim/MiniMap";
 import { MyCourseLines } from "@/components/dduim/MyCourseLines";
@@ -28,26 +28,25 @@ export default function Home() {
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; level: number }>({ lat: 37.52693, lng: 126.93447, level: 7 });
   const [toast, setToast] = useState("");
   const [limitModal, setLimitModal] = useState(false);
-  const [onlyMine, setOnlyMine] = useState(false);
   const [distRange, setDistRange] = useState<"" | "short" | "mid" | "long">("");
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
-  const { userCourses, publicCourses, savedCourseIds, currentUser, ready, actions } = useDduimStore();
+  const [linkedCourse, setLinkedCourse] = useState<Course | null>(null);
+  const { userCourses, savedCourseIds, currentUser, ready, actions } = useDduimStore();
   const sharedCourseHandledRef = useRef(false);
 
   const courses = useMemo(() => {
     const mine = new Set(userCourses.map(c => c.id));
-    return [...userCourses, ...publicCourses.filter(c => !mine.has(c.id))];
-  }, [userCourses, publicCourses]);
+    return linkedCourse && !mine.has(linkedCourse.id) ? [...userCourses, linkedCourse] : userCourses;
+  }, [linkedCourse, userCourses]);
   const favoriteSet = useMemo(() => new Set(savedCourseIds), [savedCourseIds]);
   const visibleCourses = useMemo(() => {
     let result = courses;
-    if (onlyMine) result = result.filter(c => c.mine);
     if (distRange === "short") result = result.filter(c => c.distance <= 3);
     else if (distRange === "mid") result = result.filter(c => c.distance > 3 && c.distance <= 7);
     else if (distRange === "long") result = result.filter(c => c.distance > 7);
     if (filter !== "전체") result = result.filter(c => c.tags.some(t => t.text === filter));
     return result;
-  }, [courses, filter, onlyMine, distRange]);
+  }, [courses, filter, distRange]);
   const orderedCourses = useMemo(() =>
     [...visibleCourses].sort((a, b) => a.id === activeId ? -1 : b.id === activeId ? 1 : 0),
     [activeId, visibleCourses]);
@@ -83,14 +82,30 @@ export default function Home() {
         setTab("home");
         setActiveId(sharedCourseId);
         setSnap("mid");
-        showToast("공유 코스를 열었어요");
+        showToast("링크 코스를 열었어요");
       }, 0);
       return;
     }
 
     if (ready) {
-      sharedCourseHandledRef.current = true;
-      window.setTimeout(() => showToast("코스를 찾지 못했어요"), 0);
+      fetch(`/api/courses/${encodeURIComponent(sharedCourseId)}`)
+        .then((res) => res.ok ? res.json() as Promise<Course> : null)
+        .then((course) => {
+          sharedCourseHandledRef.current = true;
+          if (!course) {
+            showToast("코스를 찾지 못했어요");
+            return;
+          }
+          setLinkedCourse(course);
+          setActiveId(course.id);
+          setTab("home");
+          setSnap("mid");
+          showToast("링크 코스를 열었어요");
+        })
+        .catch(() => {
+          sharedCourseHandledRef.current = true;
+          showToast("코스를 찾지 못했어요");
+        });
     }
   }, [activeCourse, ready, sharedCourseId, showToast]);
 
@@ -105,13 +120,21 @@ export default function Home() {
     setActiveId(course.id);
     setTab("home");
     setDrawingOpen(false);
-    showToast(course.visibility === "public" ? "코스가 저장됐어요 🌍" : "나만의 코스로 저장됐어요 🔒");
+    showToast("나만의 코스로 저장됐어요");
   };
 
   const pickCourse = (id: string) => { setActiveId(id); setTab("home"); setSnap("peek"); };
 
   const shareCourse = async (id: string) => {
     const course = courses.find(c => c.id === id);
+    if (!course?.mine) return;
+    if (course.visibility === "private") {
+      const updated = await actions.updateCourse(id, { visibility: "unlisted" });
+      if (!updated) {
+        showToast("링크를 만들지 못했어요");
+        return;
+      }
+    }
     const url = `${window.location.origin}/?c=${encodeURIComponent(id)}`;
     const title = course ? `뜀로그 - ${course.title}` : "뜀로그 코스";
     const text = course
@@ -121,7 +144,7 @@ export default function Home() {
     try {
       if (navigator.share) {
         await navigator.share({ title, text, url });
-        showToast("공유창을 열었어요");
+        showToast("코스 링크를 만들었어요");
         return;
       }
     } catch (error) {
@@ -129,7 +152,7 @@ export default function Home() {
     }
 
     const copied = await copyTextToClipboard(url);
-    showToast(copied ? "링크를 복사했어요" : "링크 복사에 실패했어요");
+    showToast(copied ? "코스 링크를 복사했어요" : "링크 복사에 실패했어요");
   };
 
   return (
@@ -140,16 +163,13 @@ export default function Home() {
             activeCourse={activeCourse} activeId={activeId} courses={courses}
             favoriteSet={favoriteSet} filter={filter} orderedCourses={orderedCourses}
             setActiveId={id => { setActiveId(id); setSnap("peek"); }}
-            setFilter={setFilter} toggleFavorite={toggleFavorite}
+            setFilter={setFilter}
             visibleCourses={visibleCourses} snap={snap} setSnap={setSnap}
             onCenterChange={setMapCenter}
             onShare={shareCourse}
-            onlyMine={onlyMine} setOnlyMine={setOnlyMine}
+            onStartDrawing={() => setDrawingOpen(true)}
             distRange={distRange} setDistRange={setDistRange}
           />
-        )}
-        {tab === "feed" && (
-          <FeedView/>
         )}
         {tab === "saves" && (
           <SavesView courses={courses} favoriteSet={favoriteSet}
@@ -189,17 +209,16 @@ export default function Home() {
             <button key={item.id} className={`nav-btn ${tab === item.id ? "is-active" : ""}`}
               onClick={() => setTab(item.id)} style={{ position: "relative" }}>
               {item.id === "home"  && <IconMap size={20}/>}
-              {item.id === "feed"  && <IconCompass size={20}/>}
               {item.id === "saves" && (
                 <>
                   <IconBookmark size={20}/>
-                  {(savedCourseIds.length + userCourses.length) > 0 && (
+                  {userCourses.length > 0 && (
                     <span style={{ position: "absolute", top: 4, right: 6, minWidth: 16,
                                    height: 16, padding: "0 4px", borderRadius: 999,
                                    background: "var(--pink-deep)", color: "#fff",
                                    fontSize: 9, fontWeight: 800, display: "flex",
                                    alignItems: "center", justifyContent: "center" }}>
-                      {savedCourseIds.length + userCourses.length}
+                      {userCourses.length}
                     </span>
                   )}
                 </>
@@ -284,16 +303,16 @@ async function copyTextToClipboard(text: string) {
 type DistRange = "" | "short" | "mid" | "long";
 
 function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
-  orderedCourses, setActiveId, setFilter, toggleFavorite, visibleCourses, snap, setSnap,
-  onCenterChange, onShare, onlyMine, setOnlyMine, distRange, setDistRange }: {
+  orderedCourses, setActiveId, setFilter, visibleCourses, snap, setSnap,
+  onCenterChange, onShare, onStartDrawing, distRange, setDistRange }: {
   activeCourse?: Course; activeId: string; courses: Course[];
   favoriteSet: Set<string>; filter: string; orderedCourses: Course[];
   setActiveId: (id: string) => void; setFilter: (f: string) => void;
-  toggleFavorite: (id: string) => void; visibleCourses: Course[];
+  visibleCourses: Course[];
   snap: SnapPosition; setSnap: (s: SnapPosition) => void;
   onCenterChange?: (center: { lat: number; lng: number; level: number }) => void;
   onShare?: (id: string) => void;
-  onlyMine: boolean; setOnlyMine: (v: boolean) => void;
+  onStartDrawing: () => void;
   distRange: DistRange; setDistRange: (v: DistRange) => void;
 }) {
   const [areaId, setAreaId] = useState("all");
@@ -301,7 +320,8 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
   const [expandedRegion, setExpandedRegion] = useState<string | null>(null);
   const [panTarget, setPanTarget] = useState<{ lat: number; lng: number; level: number } | undefined>(undefined);
   const [filterOpen, setFilterOpen] = useState(false);
-  const activeFilterCount = (onlyMine ? 1 : 0) + (distRange ? 1 : 0) + (filter !== "전체" ? 1 : 0);
+  const [routeFirstDismissed, setRouteFirstDismissed] = useState(false);
+  const activeFilterCount = (distRange ? 1 : 0) + (filter !== "전체" ? 1 : 0);
   const areaRef = useRef<HTMLDivElement>(null);
 
   const areaLabel = (() => {
@@ -338,6 +358,7 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
   const areaFilteredOrdered = areaFilterName
     ? orderedCourses.filter(c => c.area.includes(areaFilterName))
     : orderedCourses;
+  const showRouteFirstPanel = !routeFirstDismissed && courses.length === 0;
 
   useEffect(() => {
     if (!areaOpen) return;
@@ -502,19 +523,6 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
           transition: "max-height 0.26s cubic-bezier(0.4,0,0.2,1)",
         }}>
           <div style={{ padding: "14px 18px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* 내 코스 */}
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>보기</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  className={`chip ${onlyMine ? "is-mine" : ""}`}
-                  onClick={() => setOnlyMine(!onlyMine)}
-                >
-                  내 코스만
-                </button>
-              </div>
-            </div>
-
             {/* 거리 */}
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>거리</div>
@@ -551,6 +559,31 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
           onCenterChange={onCenterChange}
           onPick={id => { setActiveId(id); setSnap("peek"); }}/>
         <MyCourseLines courses={courses.filter(c => c.mine && !c.geoPath?.length)} activeId={activeId}/>
+
+        {showRouteFirstPanel && (
+          <div className="route-first-panel">
+            <button
+              className="route-first-close"
+              type="button"
+              onClick={() => setRouteFirstDismissed(true)}
+              aria-label="안내 닫기"
+            >
+              ×
+            </button>
+            <div className="route-first-kicker">오늘 어디 뛰지?</div>
+            <h1>지도를 톡톡 찍어서<br/>러닝 코스를 미리 만들어봐요</h1>
+            <p>거리와 예상 시간을 먼저 보고, 마음에 들면 내 코스로 저장하면 돼요.</p>
+            <div className="route-first-presets" aria-label="거리 프리셋">
+              {["3km", "5km", "7km", "왕복"].map((label) => (
+                <button key={label} type="button" onClick={onStartDrawing}>{label}</button>
+              ))}
+            </div>
+            <button className="route-first-cta" type="button" onClick={onStartDrawing}>
+              <IconPlus size={18} color="#FDFCF8"/>
+              코스 찍기 시작
+            </button>
+          </div>
+        )}
         
         <div style={{ position: "absolute", right: 12, top: 12, zIndex: 6 }}>
           <button className="icon-btn" aria-label="현재 위치" style={{ width: 36, height: 36 }}>
@@ -586,11 +619,26 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
               <CourseCard key={c.id} course={c} isActive={c.id === activeId}
                 isSaved={favoriteSet.has(c.id)}
                 onClick={() => { setActiveId(c.id); setSnap("peek"); }}
-                onToggleSave={toggleFavorite}
-                onShare={onShare ? () => onShare(c.id) : undefined}/>
+                onShare={onShare && c.mine ? () => onShare(c.id) : undefined}/>
             ))}
             {areaFilteredOrdered.length === 0 && (
-              <div style={{ padding: "40px 16px", textAlign: "center", color: "var(--text-3)" }}>
+              <div className="route-empty-state">
+                <div className="route-empty-icon">
+                  <IconMap size={22} color="var(--mint-ink)"/>
+                </div>
+                <strong>아직 보여줄 코스가 없어요</strong>
+                <p>빈 동네처럼 보이기 전에, 이 지역 첫 러닝 코스를 직접 찍어보세요.</p>
+                <button type="button" onClick={onStartDrawing}>이 동네 첫 코스 만들기</button>
+              </div>
+            )}
+            {false && areaFilteredOrdered.length === 0 && (
+              <div className="route-empty-state">
+                <div className="route-empty-icon">
+                  <IconMap size={22} color="var(--mint-ink)"/>
+                </div>
+                <strong>아직 보여줄 코스가 없어요</strong>
+                <p>빈 동네처럼 보이기 전에, 이 지역 첫 러닝 코스를 직접 찍어보세요.</p>
+                <button type="button" onClick={onStartDrawing}>이 동네 첫 코스 만들기</button>
                 조건에 맞는 코스가 아직 없어요 🐣
               </div>
             )}
@@ -601,36 +649,17 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
   );
 }
 
-// ─── FeedView ─────────────────────────────────────────────────────────────────
-function FeedView() {
-  return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-                  justifyContent: "center", gap: 12, paddingBottom: 80 }}>
-      <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#C8B89A" strokeWidth="1.4"
-           strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7z"/>
-        <circle cx="12" cy="9" r="2.5"/>
-      </svg>
-      <div style={{ fontSize: 17, fontWeight: 800, color: "var(--text-1)", letterSpacing: "-0.025em" }}>
-        피드
-      </div>
-      <div style={{ fontSize: 13.5, color: "var(--text-3)", fontWeight: 500 }}>준비 중이에요</div>
-    </div>
-  );
-}
-
 // ─── SavesView ────────────────────────────────────────────────────────────────
 function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse, onEditCourse }: {
   courses: Course[]; favoriteSet: Set<string>;
   toggleFavorite: (id: string) => void; pickCourse: (id: string) => void;
   onEditCourse?: (c: Course) => void;
 }) {
-  const [seg, setSeg] = useState<"favs" | "mine">("favs");
+  const [seg, setSeg] = useState<"favs" | "mine">("mine");
   const sort = "최근";
 
   const myCourses  = courses.filter(c => c.mine);
-  const favCourses = courses.filter(c => favoriteSet.has(c.id));
-  const list = seg === "favs" ? favCourses : myCourses;
+  const list = myCourses;
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -639,9 +668,9 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse, onEditCou
 
         <div style={{ display: "flex", gap: 0, marginTop: 14, background: "var(--bg-soft)",
                       padding: 4, borderRadius: 999, border: "1px solid var(--border-warm)" }}>
-          {(["favs", "mine"] as const).map(s => {
+          {(["mine"] as const).map(s => {
             const isOn = seg === s;
-            const count = s === "favs" ? favCourses.length : myCourses.length;
+            const count = myCourses.length;
             return (
               <button key={s} onClick={() => setSeg(s)} style={{
                 flex: 1, height: 36, borderRadius: 999,
@@ -653,11 +682,11 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse, onEditCou
                 transition: "all 0.18s ease",
                 display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
               }}>
-                <span style={{ fontSize: 14 }}>{s === "favs" ? "😊" : "🎒"}</span>
-                <span>{s === "favs" ? "즐겨찾기" : "내가 만든"}</span>
+                <span style={{ fontSize: 14 }}>🎒</span>
+                <span>내가 만든</span>
                 <span style={{ minWidth: 18, padding: "0 5px", height: 18, borderRadius: 999,
                                fontSize: 10.5, fontWeight: 800,
-                               background: isOn ? (s === "favs" ? "var(--yellow)" : "var(--mint)") : "var(--border-warm)",
+                               background: isOn ? "var(--mint)" : "var(--border-warm)",
                                color: "var(--text-1)", display: "inline-flex",
                                alignItems: "center", justifyContent: "center" }}>{count}</span>
               </button>
@@ -723,7 +752,7 @@ function SavesView({ courses, favoriteSet, toggleFavorite, pickCourse, onEditCou
                   <MiniMap path={c.path} color={c.color}/>
                   <button className={`smile ${favoriteSet.has(c.id) ? "is-on" : ""}`}
                     onClick={e => { e.stopPropagation(); toggleFavorite(c.id); }}
-                    style={{ position: "absolute", top: 6, right: 6, width: 30, height: 30 }}
+                    style={{ display: "none", position: "absolute", top: 6, right: 6, width: 30, height: 30 }}
                     aria-label="즐겨찾기">
                     <SmileFavorite on={favoriteSet.has(c.id)}/>
                   </button>
@@ -1066,7 +1095,7 @@ function EditCourseSheet({ course, onClose, onSave }: {
                             letterSpacing: "0.05em", textTransform: "uppercase",
                             display: "block", marginBottom: 8 }}>공개 여부</label>
             <div style={{ display: "flex", gap: 8 }}>
-              {([["private", "🔒 나만 보기"], ["public", "🌍 전체 공개"]] as const).map(([val, label]) => (
+              {([["private", "나만 보기"], ["unlisted", "링크로만 보기"]] as const).map(([val, label]) => (
                 <button key={val} onClick={() => setVisibility(val)} style={{
                   flex: 1, height: 42, borderRadius: 14,
                   border: visibility === val ? "1.5px solid var(--mint-deep)" : "1px solid var(--border-warm)",

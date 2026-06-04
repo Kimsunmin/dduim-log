@@ -91,8 +91,7 @@ export const FILTER_OPTIONS = ["전체", "한강뷰", "초보환영", "신호등
 
 export const navItems = [
   { id: "home",  label: "탐색" },
-  { id: "feed",  label: "피드" },
-  { id: "saves", label: "저장" },
+  { id: "saves", label: "내 코스" },
   { id: "me",    label: "나"   },
 ] as const;
 export type TabId = (typeof navItems)[number]["id"];

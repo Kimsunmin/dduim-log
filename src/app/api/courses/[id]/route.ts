@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateCourse } from "@/lib/server/store";
+import { getShareableCourse, updateCourse } from "@/lib/server/store";
 import type { Course } from "@/lib/dduim/types";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const course = await getShareableCourse(id);
+  if (!course) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  return NextResponse.json(course);
+}
 
 export async function PATCH(
   req: NextRequest,

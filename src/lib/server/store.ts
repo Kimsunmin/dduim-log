@@ -85,7 +85,7 @@ export async function updateUserProfile(
  * 전체 앱 상태 조립 (없으면 user 생성 후 반환)
  */
 export async function loadState(userId: string): Promise<DduimAppState> {
-  const [user, courseRows, savedRows, likedRows, publicRows] = await Promise.all([
+  const [user, courseRows, savedRows, likedRows] = await Promise.all([
     getOrCreateUser(userId),
     db
       .select()
@@ -93,25 +93,26 @@ export async function loadState(userId: string): Promise<DduimAppState> {
       .where(and(eq(courses.ownerId, userId), isNull(courses.deletedAt))),
     db.select().from(savedCourses).where(eq(savedCourses.userId, userId)),
     db.select().from(likedPosts).where(eq(likedPosts.userId, userId)),
-    db
-      .select()
-      .from(courses)
-      .where(and(
-        eq(courses.visibility, "public"),
-        ne(courses.ownerId, userId),
-        isNull(courses.deletedAt),
-      )),
   ]);
 
   return {
     version: 1,
     currentUser: user,
     userCourses: courseRows.map(toCourse),
-    publicCourses: publicRows.map(r => ({ ...toCourse(r), mine: false })),
+    publicCourses: [],
     savedCourseIds: savedRows.map((r) => r.courseId),
     likedPostIds: likedRows.map((r) => r.postId),
     updatedAt: new Date().toISOString(),
   };
+}
+
+export async function getShareableCourse(courseId: string): Promise<Course | null> {
+  const [row] = await db
+    .select()
+    .from(courses)
+    .where(and(ne(courses.visibility, "private"), eq(courses.id, courseId), isNull(courses.deletedAt)));
+
+  return row ? { ...toCourse(row), mine: false } : null;
 }
 
 // ─── Courses ──────────────────────────────────────────────────────────────────

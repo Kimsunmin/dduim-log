@@ -4,7 +4,7 @@ import { SmileFavorite } from "./icons";
 
 export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, onShare, onEdit }: {
   course: Course; isActive: boolean; isSaved: boolean;
-  onClick: () => void; onToggleSave: (id: string) => void;
+  onClick: () => void; onToggleSave?: (id: string) => void;
   onShare?: () => void; onEdit?: () => void;
 }) {
   return (
@@ -31,7 +31,8 @@ export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, o
             </h3>
           </div>
           <button type="button" className={`smile ${isSaved ? "is-on" : ""}`}
-            onClick={e => { e.stopPropagation(); onToggleSave(course.id); }}
+            style={{ display: onToggleSave ? undefined : "none" }}
+            onClick={e => { e.stopPropagation(); onToggleSave?.(course.id); }}
             aria-label={isSaved ? "즐겨찾기 해제" : "즐겨찾기 추가"}>
             <SmileFavorite on={isSaved}/>
           </button>
