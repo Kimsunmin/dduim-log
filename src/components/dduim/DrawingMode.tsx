@@ -11,12 +11,21 @@ import {
 } from "@/lib/dduim/utils";
 import { IconClock } from "./icons";
 import {
-  loadKakaoMap,
-  type KakaoMap,
-  type KakaoMarker,
-  type KakaoPolyline,
-} from "@/lib/kakao/load-kakao-map";
-import { reverseGeocode } from "@/lib/kakao/reverse-geocode";
+  loadLeafletMap,
+  type LeafletMap,
+  type LeafletMarker,
+  type LeafletNamespace,
+  type LeafletPolyline,
+} from "@/lib/osm/load-leaflet-map";
+import {
+  OSM_BASEMAP_ATTRIBUTION,
+  OSM_BASEMAP_MAX_NATIVE_ZOOM,
+  OSM_BASEMAP_MAX_ZOOM,
+  OSM_BASEMAP_MIN_ZOOM,
+  OSM_BASEMAP_TILE_URL,
+} from "@/lib/osm/basemap";
+import { fetchPedestrianRoute } from "@/lib/osm/pedestrian-routing";
+import { reverseGeocode } from "@/lib/osm/reverse-geocode";
 
 const DEFAULT_CENTER = { lat: 37.52693, lng: 126.93447, level: 5 };
 const ROUTE_COLOR = "#6FC2A6";
@@ -49,12 +58,16 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   const [mapReady, setMapReady] = useState(false);
   const [mapFailed, setMapFailed] = useState(false);
   const [mapRevision, setMapRevision] = useState(0);
+  const [routingStatus, setRoutingStatus] = useState<"idle" | "routing" | "fallback">("idle");
+  const [snappedForwardPath, setSnappedForwardPath] = useState<LatLngLiteral[]>([]);
+  const [snappedReturnPath, setSnappedReturnPath] = useState<LatLngLiteral[]>([]);
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<KakaoMap | null>(null);
-  const polylineRef = useRef<KakaoPolyline | null>(null);
-  const returnPolylineRef = useRef<KakaoPolyline | null>(null);
-  const markersRef = useRef<KakaoMarker[]>([]);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const leafletRef = useRef<LeafletNamespace | null>(null);
+  const polylineRef = useRef<LeafletPolyline | null>(null);
+  const returnPolylineRef = useRef<LeafletPolyline | null>(null);
+  const markersRef = useRef<LeafletMarker[]>([]);
   const initialCenterRef = useRef(initialCenter);
   const controlPointsRef = useRef(controlPoints);
   const returnEnabledRef = useRef(returnEnabled);
@@ -74,13 +87,27 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
     selectedPointIndexRef.current = selectedPointIndex;
   }, [selectedPointIndex]);
 
-  const rawPath = useMemo(() => {
-    if (!returnEnabled || controlPoints.length < 2) return controlPoints;
-    return [...controlPoints, ...generateReturnPath(controlPoints)];
-  }, [controlPoints, returnEnabled]);
-  const routePath = useMemo(() => smoothGeoPath(rawPath, smoothness), [rawPath, smoothness]);
   const returnStartIndex = returnEnabled ? controlPoints.length - 1 : null;
-  const forwardPath = returnStartIndex == null ? routePath : smoothGeoPath(controlPoints, smoothness);
+  const returnSegmentSeed = useMemo(() => {
+    if (returnStartIndex == null) return [];
+    return [controlPoints[returnStartIndex], ...generateReturnPath(controlPoints)];
+  }, [controlPoints, returnStartIndex]);
+  const fallbackForwardPath = useMemo(() => smoothGeoPath(controlPoints, smoothness), [controlPoints, smoothness]);
+  const fallbackReturnPath = useMemo(
+    () => returnSegmentSeed.length ? smoothGeoPath(returnSegmentSeed, smoothness) : [],
+    [returnSegmentSeed, smoothness],
+  );
+  const forwardPath = useMemo(
+    () => snappedForwardPath.length >= 2 ? snappedForwardPath : fallbackForwardPath,
+    [fallbackForwardPath, snappedForwardPath],
+  );
+  const returnPath = useMemo(
+    () => returnEnabled
+      ? snappedReturnPath.length >= 2 ? snappedReturnPath : fallbackReturnPath
+      : [],
+    [fallbackReturnPath, returnEnabled, snappedReturnPath],
+  );
+  const routePath = useMemo(() => combineRoutePaths(forwardPath, returnPath), [forwardPath, returnPath]);
   const pace = PACE_PRESETS.find(p => p.id === paceId) || PACE_PRESETS[1];
   const km = calcGeoDistance(routePath);
   const minsRounded = Math.max(1, Math.round(km * pace.pace));
@@ -89,14 +116,6 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   const smoothD = smoothedPath(normalizedPath);
   const firstLat = controlPoints[0]?.lat;
   const firstLng = controlPoints[0]?.lng;
-  const returnSegmentSeed = useMemo(() => {
-    if (returnStartIndex == null) return [];
-    return [controlPoints[returnStartIndex], ...generateReturnPath(controlPoints)];
-  }, [controlPoints, returnStartIndex]);
-  const returnPath = useMemo(
-    () => returnSegmentSeed.length ? smoothGeoPath(returnSegmentSeed, smoothness) : [],
-    [returnSegmentSeed, smoothness],
-  );
 
   const currentDrawingSnapshot = useCallback((): DrawingSnapshot => ({
     controlPoints: controlPointsRef.current,
@@ -131,25 +150,96 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   }, [firstLat, firstLng]);
 
   useEffect(() => {
+    if (controlPoints.length < 2) {
+      const timeout = window.setTimeout(() => {
+        setSnappedForwardPath([]);
+        setRoutingStatus("idle");
+      }, 0);
+      return () => window.clearTimeout(timeout);
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setRoutingStatus("routing");
+      fetchPedestrianRoute(controlPoints, controller.signal)
+        .then((route) => {
+          if (controller.signal.aborted) return;
+          setSnappedForwardPath(route?.path?.length ? route.path : []);
+          setRoutingStatus(route?.path?.length ? "idle" : "fallback");
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setSnappedForwardPath([]);
+            setRoutingStatus("fallback");
+          }
+        });
+    }, 240);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [controlPoints]);
+
+  useEffect(() => {
+    if (!returnEnabled || returnSegmentSeed.length < 2) {
+      const timeout = window.setTimeout(() => setSnappedReturnPath([]), 0);
+      return () => window.clearTimeout(timeout);
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setRoutingStatus("routing");
+      fetchPedestrianRoute(returnSegmentSeed, controller.signal)
+        .then((route) => {
+          if (controller.signal.aborted) return;
+          setSnappedReturnPath(route?.path?.length ? route.path : []);
+          setRoutingStatus(route?.path?.length ? "idle" : "fallback");
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setSnappedReturnPath([]);
+            setRoutingStatus("fallback");
+          }
+        });
+    }, 240);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [returnEnabled, returnSegmentSeed]);
+
+  useEffect(() => {
     if (stage !== "draw") return;
     let cancelled = false;
 
-    loadKakaoMap()
-      .then(maps => {
+    loadLeafletMap()
+      .then(L => {
         if (cancelled || !mapContainerRef.current) return;
         const center = initialCenterRef.current ?? DEFAULT_CENTER;
-        const map = new maps.Map(mapContainerRef.current, {
-          center: new maps.LatLng(center.lat, center.lng),
-          level: center.level ?? DEFAULT_CENTER.level,
+        const map = L.map(mapContainerRef.current, {
+          center: [center.lat, center.lng],
+          minZoom: OSM_BASEMAP_MIN_ZOOM,
+          zoom: toLeafletZoom(center.level ?? DEFAULT_CENTER.level),
+          zoomControl: false,
         });
 
+        L.tileLayer(OSM_BASEMAP_TILE_URL, {
+          attribution: OSM_BASEMAP_ATTRIBUTION,
+          maxNativeZoom: OSM_BASEMAP_MAX_NATIVE_ZOOM,
+          maxZoom: OSM_BASEMAP_MAX_ZOOM,
+          minZoom: OSM_BASEMAP_MIN_ZOOM,
+        }).addTo(map);
+
+        leafletRef.current = L;
         mapRef.current = map;
-        maps.event.addListener(map, "click", (mouseEvent) => {
+        map.on("click", (mouseEvent) => {
           if (cancelled) return;
-          const latLng = mouseEvent.latLng;
+          const latLng = mouseEvent.latlng;
           pushUndoSnapshot();
           setSelectedPointIndex(null);
-          setControlPoints(prev => [...prev, { lat: latLng.getLat(), lng: latLng.getLng() }]);
+          setControlPoints(prev => [...prev, { lat: latLng.lat, lng: latLng.lng }]);
           if (returnEnabledRef.current) setReturnEnabled(false);
         });
         setMapReady(true);
@@ -161,104 +251,104 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
 
     return () => {
       cancelled = true;
-      polylineRef.current?.setMap(null);
-      returnPolylineRef.current?.setMap(null);
-      markersRef.current.forEach(marker => marker.setMap(null));
+      polylineRef.current?.remove();
+      returnPolylineRef.current?.remove();
+      markersRef.current.forEach(marker => marker.remove());
       polylineRef.current = null;
       returnPolylineRef.current = null;
       markersRef.current = [];
+      leafletRef.current = null;
+      mapRef.current?.remove();
       mapRef.current = null;
     };
   }, [pushUndoSnapshot, stage]);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
-    let alive = true;
+    if (!mapReady || !mapRef.current || !leafletRef.current) return;
+    const L = leafletRef.current;
 
-    loadKakaoMap().then(maps => {
-      if (!alive || !mapRef.current) return;
-      polylineRef.current?.setMap(null);
-      returnPolylineRef.current?.setMap(null);
-      polylineRef.current = null;
-      returnPolylineRef.current = null;
+    polylineRef.current?.remove();
+    returnPolylineRef.current?.remove();
+    polylineRef.current = null;
+    returnPolylineRef.current = null;
 
-      if (forwardPath.length >= 2) {
-        polylineRef.current = new maps.Polyline({
-          map: mapRef.current,
-          path: forwardPath.map(point => new maps.LatLng(point.lat, point.lng)),
-          strokeWeight: 7,
-          strokeColor: ROUTE_COLOR,
-          strokeOpacity: 0.92,
-          strokeStyle: "solid",
-        });
-      }
+    if (forwardPath.length >= 2) {
+      polylineRef.current = L.polyline(forwardPath.map(toTuple), {
+        color: ROUTE_COLOR,
+        opacity: 0.92,
+        weight: 7,
+      }).addTo(mapRef.current);
+    }
 
-      if (returnPath.length >= 2) {
-        returnPolylineRef.current = new maps.Polyline({
-          map: mapRef.current,
-          path: returnPath.map(point => new maps.LatLng(point.lat, point.lng)),
-          strokeWeight: 6,
-          strokeColor: RETURN_COLOR,
-          strokeOpacity: 0.74,
-          strokeStyle: "shortdash",
-        });
-      }
-    });
+    if (returnPath.length >= 2) {
+      returnPolylineRef.current = L.polyline(returnPath.map(toTuple), {
+        color: RETURN_COLOR,
+        dashArray: "6 8",
+        opacity: 0.74,
+        weight: 6,
+      }).addTo(mapRef.current);
+    }
 
     return () => {
-      alive = false;
+      polylineRef.current?.remove();
+      returnPolylineRef.current?.remove();
+      polylineRef.current = null;
+      returnPolylineRef.current = null;
     };
   }, [forwardPath, mapReady, mapRevision, returnPath]);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current) return;
+    if (!mapReady || !mapRef.current || !leafletRef.current) return;
+    const L = leafletRef.current;
     let alive = true;
 
-    loadKakaoMap().then(maps => {
-      if (!alive || !mapRef.current) return;
-      markersRef.current.forEach(marker => marker.setMap(null));
-      markersRef.current = [];
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
 
-      if (!showPoints) return;
+    if (!showPoints) return;
 
-      markersRef.current = controlPoints.map((point, index) => {
-        const isStart = index === 0;
-        const isEnd = index === controlPoints.length - 1 && controlPoints.length > 1;
-        const marker = new maps.Marker({
-          map: mapRef.current!,
-          position: new maps.LatLng(point.lat, point.lng),
-          draggable: true,
-          image: new maps.MarkerImage(makeSvgMarkerUrl(isStart, isEnd, selectedPointIndex === index), new maps.Size(isStart ? 30 : isEnd ? 24 : 16, isStart ? 30 : isEnd ? 24 : 16)),
-          zIndex: selectedPointIndex === index ? 45 : isStart ? 35 : isEnd ? 32 : 25,
-        });
+    markersRef.current = controlPoints.map((point, index) => {
+      const isStart = index === 0;
+      const isEnd = index === controlPoints.length - 1 && controlPoints.length > 1;
+      const size = isStart ? 30 : isEnd ? 24 : 16;
+      const marker = L.marker(toTuple(point), {
+        draggable: true,
+        icon: L.icon({
+          iconUrl: makeSvgMarkerUrl(isStart, isEnd, selectedPointIndex === index),
+          iconSize: [size, size],
+          iconAnchor: [size / 2, size / 2],
+        }),
+        zIndexOffset: selectedPointIndex === index ? 450 : isStart ? 350 : isEnd ? 320 : 250,
+      }).addTo(mapRef.current!);
 
-        maps.event.addListener(marker, "click", () => {
-          setSelectedPointIndex(prev => prev === index ? null : index);
-        });
-        maps.event.addListener(marker, "dragstart", () => {
-          dragSnapshotRef.current = currentDrawingSnapshot();
-          setSelectedPointIndex(index);
-        });
-        maps.event.addListener(marker, "dragend", () => {
-          if (!alive) return;
-          const pos = marker.getPosition();
-          if (dragSnapshotRef.current) {
-            pushUndoSnapshot(dragSnapshotRef.current);
-            dragSnapshotRef.current = null;
-          }
-          setControlPoints(prev => {
-            const next = [...prev];
-            next[index] = { lat: pos.getLat(), lng: pos.getLng() };
-            return next;
-          });
-        });
-
-        return marker;
+      marker.on("click", () => {
+        setSelectedPointIndex(prev => prev === index ? null : index);
       });
+      marker.on("dragstart", () => {
+        dragSnapshotRef.current = currentDrawingSnapshot();
+        setSelectedPointIndex(index);
+      });
+      marker.on("dragend", () => {
+        if (!alive) return;
+        const pos = marker.getLatLng();
+        if (dragSnapshotRef.current) {
+          pushUndoSnapshot(dragSnapshotRef.current);
+          dragSnapshotRef.current = null;
+        }
+        setControlPoints(prev => {
+          const next = [...prev];
+          next[index] = { lat: pos.lat, lng: pos.lng };
+          return next;
+        });
+      });
+
+      return marker;
     });
 
     return () => {
       alive = false;
+      markersRef.current.forEach(marker => marker.remove());
+      markersRef.current = [];
     };
   }, [controlPoints, currentDrawingSnapshot, mapReady, mapRevision, pushUndoSnapshot, selectedPointIndex, showPoints]);
 
@@ -343,6 +433,11 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
             )}
             {mapReady && controlPoints.length === 0 && (
               <div className="draw-hint">지도에서 출발점을 톡 찍어주세요</div>
+            )}
+            {mapReady && controlPoints.length >= 2 && routingStatus !== "idle" && (
+              <div className="route-snap-status">
+                {routingStatus === "routing" ? "보행로에 붙이는 중" : "보행 경로를 찾지 못해 임시 선으로 표시 중"}
+              </div>
             )}
           </div>
 
@@ -671,6 +766,21 @@ function AdjustButton({ label, disabled = false, onClick }: {
       {label}
     </button>
   );
+}
+
+function combineRoutePaths(forwardPath: LatLngLiteral[], returnPath: LatLngLiteral[]): LatLngLiteral[] {
+  if (!returnPath.length) return forwardPath;
+  if (!forwardPath.length) return returnPath;
+  return [...forwardPath, ...returnPath.slice(1)];
+}
+
+function toTuple(point: LatLngLiteral): [number, number] {
+  return [point.lat, point.lng];
+}
+
+function toLeafletZoom(level: number) {
+  const zoom = level > 10 ? level : 16 - level;
+  return Math.max(OSM_BASEMAP_MIN_ZOOM, Math.min(OSM_BASEMAP_MAX_ZOOM, zoom));
 }
 
 function makeSvgMarkerUrl(isStart: boolean, isEnd: boolean, isSelected: boolean): string {

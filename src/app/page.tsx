@@ -9,7 +9,7 @@ import { BottomSheet } from "@/components/dduim/BottomSheet";
 import { CourseCard } from "@/components/dduim/CourseCard";
 import { DrawingMode } from "@/components/dduim/DrawingMode";
 import { IconBookmark, IconChevronDown, IconCompass, IconMap, IconPlus, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
-import { KakaoMapView } from "@/components/dduim/KakaoMapView";
+import { OsmMapView } from "@/components/dduim/OsmMapView";
 import { MiniMap } from "@/components/dduim/MiniMap";
 import { MyCourseLines } from "@/components/dduim/MyCourseLines";
 
@@ -545,7 +545,7 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
       </div>
 
       <section className="map-shell">
-        <KakaoMapView courses={areaFilteredVisible} activeId={activeId}
+        <OsmMapView courses={areaFilteredVisible} activeId={activeId}
           favoriteIds={favoriteSet}
           panToLatLng={panTarget}
           onCenterChange={onCenterChange}
