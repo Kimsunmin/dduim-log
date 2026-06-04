@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Course, SnapPosition } from "@/lib/dduim/types";
-import { AREAS, FILTER_OPTIONS, TAG_CATALOG, navItems } from "@/lib/dduim/data";
+import { AREAS, TAG_CATALOG, navItems } from "@/lib/dduim/data";
 import type { TabId } from "@/lib/dduim/data";
 import { useDduimStore } from "@/lib/dduim/store";
 import { BottomSheet } from "@/components/dduim/BottomSheet";
 import { CourseCard } from "@/components/dduim/CourseCard";
 import { DrawingMode } from "@/components/dduim/DrawingMode";
-import { IconBookmark, IconChevronDown, IconMap, IconPlus, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
+import { IconBookmark, IconChevronDown, IconMap, IconPlus, IconSearch, IconUser, ShoeGlyph, SmileFavorite } from "@/components/dduim/icons";
 import { OsmMapView } from "@/components/dduim/OsmMapView";
 import { MiniMap } from "@/components/dduim/MiniMap";
 import { MyCourseLines } from "@/components/dduim/MyCourseLines";
@@ -22,7 +22,6 @@ export default function Home() {
   const [tab, setTab] = useState<TabId>("home");
   const [activeId, setActiveId] = useState(() => getCourseIdFromUrl());
   const [sharedCourseId, setSharedCourseId] = useState(() => getCourseIdFromUrl());
-  const [filter, setFilter] = useState("전체");
   const [snap, setSnap] = useState<SnapPosition>("mid");
   const [drawingOpen, setDrawingOpen] = useState(false);
   const [mapCenter, setMapCenter] = useState<{ lat: number; lng: number; level: number }>({ lat: 37.52693, lng: 126.93447, level: 7 });
@@ -44,9 +43,8 @@ export default function Home() {
     if (distRange === "short") result = result.filter(c => c.distance <= 3);
     else if (distRange === "mid") result = result.filter(c => c.distance > 3 && c.distance <= 7);
     else if (distRange === "long") result = result.filter(c => c.distance > 7);
-    if (filter !== "전체") result = result.filter(c => c.tags.some(t => t.text === filter));
     return result;
-  }, [courses, filter, distRange]);
+  }, [courses, distRange]);
   const orderedCourses = useMemo(() =>
     [...visibleCourses].sort((a, b) => a.id === activeId ? -1 : b.id === activeId ? 1 : 0),
     [activeId, visibleCourses]);
@@ -123,6 +121,36 @@ export default function Home() {
     showToast("나만의 코스로 저장됐어요");
   };
 
+  const saveSharedCourse = async (id: string) => {
+    const course = courses.find(c => c.id === id);
+    if (!course || course.mine) return;
+
+    const copy: Course = {
+      ...course,
+      id: `copy-${course.id}-${crypto.randomUUID()}`,
+      author: currentUser.displayName,
+      mine: true,
+      ownerId: currentUser.id,
+      saves: 0,
+      source: "user",
+      visibility: "private",
+      createdAt: undefined,
+      updatedAt: undefined,
+      deletedAt: null,
+    };
+
+    const result = await actions.saveUserCourse(copy);
+    if (result.limitReached) { setLimitModal(true); return; }
+
+    setLinkedCourse(null);
+    setSharedCourseId("");
+    window.history.replaceState(null, "", window.location.pathname);
+    setActiveId(copy.id);
+    setTab("home");
+    setSnap("peek");
+    showToast("내 코스로 저장했어요");
+  };
+
   const pickCourse = (id: string) => { setActiveId(id); setTab("home"); setSnap("peek"); };
 
   const shareCourse = async (id: string) => {
@@ -161,12 +189,12 @@ export default function Home() {
         {tab === "home" && (
           <ExploreView
             activeCourse={activeCourse} activeId={activeId} courses={courses}
-            favoriteSet={favoriteSet} filter={filter} orderedCourses={orderedCourses}
+            favoriteSet={favoriteSet} orderedCourses={orderedCourses}
             setActiveId={id => { setActiveId(id); setSnap("peek"); }}
-            setFilter={setFilter}
             visibleCourses={visibleCourses} snap={snap} setSnap={setSnap}
             onCenterChange={setMapCenter}
             onShare={shareCourse}
+            onSaveSharedCourse={saveSharedCourse}
             onStartDrawing={() => setDrawingOpen(true)}
             distRange={distRange} setDistRange={setDistRange}
           />
@@ -302,16 +330,26 @@ async function copyTextToClipboard(text: string) {
 
 type DistRange = "" | "short" | "mid" | "long";
 
-function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
-  orderedCourses, setActiveId, setFilter, visibleCourses, snap, setSnap,
-  onCenterChange, onShare, onStartDrawing, distRange, setDistRange }: {
+type PlaceSearchResult = {
+  id: string;
+  label: string;
+  lat: number;
+  lng: number;
+  name: string;
+  type: string;
+};
+
+function ExploreView({ activeCourse, activeId, courses, favoriteSet,
+  orderedCourses, setActiveId, visibleCourses, snap, setSnap,
+  onCenterChange, onShare, onSaveSharedCourse, onStartDrawing, distRange, setDistRange }: {
   activeCourse?: Course; activeId: string; courses: Course[];
-  favoriteSet: Set<string>; filter: string; orderedCourses: Course[];
-  setActiveId: (id: string) => void; setFilter: (f: string) => void;
+  favoriteSet: Set<string>; orderedCourses: Course[];
+  setActiveId: (id: string) => void;
   visibleCourses: Course[];
   snap: SnapPosition; setSnap: (s: SnapPosition) => void;
   onCenterChange?: (center: { lat: number; lng: number; level: number }) => void;
   onShare?: (id: string) => void;
+  onSaveSharedCourse?: (id: string) => void;
   onStartDrawing: () => void;
   distRange: DistRange; setDistRange: (v: DistRange) => void;
 }) {
@@ -321,8 +359,13 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
   const [panTarget, setPanTarget] = useState<{ lat: number; lng: number; level: number } | undefined>(undefined);
   const [filterOpen, setFilterOpen] = useState(false);
   const [routeFirstDismissed, setRouteFirstDismissed] = useState(false);
-  const activeFilterCount = (distRange ? 1 : 0) + (filter !== "전체" ? 1 : 0);
+  const [placeQuery, setPlaceQuery] = useState("");
+  const [placeResults, setPlaceResults] = useState<PlaceSearchResult[]>([]);
+  const [placeSearchOpen, setPlaceSearchOpen] = useState(false);
+  const [placeSearchStatus, setPlaceSearchStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const activeFilterCount = distRange ? 1 : 0;
   const areaRef = useRef<HTMLDivElement>(null);
+  const placeSearchRef = useRef<HTMLDivElement>(null);
 
   const areaLabel = (() => {
     if (areaId === "all") return "전체 지역";
@@ -370,6 +413,61 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
     document.addEventListener("keydown", esc);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [areaOpen]);
+
+  useEffect(() => {
+    const query = placeQuery.trim();
+    if (query.length < 2) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setPlaceSearchStatus("loading");
+      fetch(`/api/geocode/search?q=${encodeURIComponent(query)}`, { signal: controller.signal })
+        .then((res) => res.ok ? res.json() as Promise<{ results?: PlaceSearchResult[] }> : { results: [] })
+        .then((data) => {
+          setPlaceResults(data.results ?? []);
+          setPlaceSearchStatus("done");
+          setPlaceSearchOpen(true);
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setPlaceResults([]);
+          setPlaceSearchStatus("error");
+          setPlaceSearchOpen(true);
+        });
+    }, 280);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [placeQuery]);
+
+  useEffect(() => {
+    if (!placeSearchOpen) return;
+    const close = (e: MouseEvent) => {
+      if (placeSearchRef.current && !placeSearchRef.current.contains(e.target as Node)) {
+        setPlaceSearchOpen(false);
+      }
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setPlaceSearchOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [placeSearchOpen]);
+
+  const pickPlace = (place: PlaceSearchResult) => {
+    setPanTarget({ lat: place.lat, lng: place.lng, level: 16 });
+    setPlaceQuery(place.name);
+    setPlaceSearchOpen(false);
+    setAreaOpen(false);
+    setFilterOpen(false);
+    setSnap("peek");
+  };
 
   return (
     <>
@@ -519,7 +617,7 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
           boxShadow: "0 8px 24px -4px rgba(60,40,20,0.15)",
           zIndex: 45,
           overflow: "hidden",
-          maxHeight: filterOpen ? 400 : 0,
+          maxHeight: filterOpen ? 170 : 0,
           transition: "max-height 0.26s cubic-bezier(0.4,0,0.2,1)",
         }}>
           <div style={{ padding: "14px 18px 18px", display: "flex", flexDirection: "column", gap: 16 }}>
@@ -538,16 +636,6 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
               </div>
             </div>
 
-            {/* 태그 */}
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>태그</div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {FILTER_OPTIONS.map(f => (
-                  <button key={f} className={`chip ${filter === f ? "is-active" : ""}`}
-                    onClick={() => setFilter(f)}>{f === "전체" ? f : `#${f}`}</button>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -559,6 +647,71 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
           onCenterChange={onCenterChange}
           onPick={id => { setActiveId(id); setSnap("peek"); }}/>
         <MyCourseLines courses={courses.filter(c => c.mine && !c.geoPath?.length)} activeId={activeId}/>
+
+        <div className="place-search-floating" ref={placeSearchRef}>
+          <form
+            className={`place-search-box ${placeSearchOpen ? "is-open" : ""}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (placeResults[0]) pickPlace(placeResults[0]);
+              else if (placeQuery.trim().length >= 2) setPlaceSearchOpen(true);
+            }}
+          >
+            <IconSearch size={17} color="var(--mint-ink)"/>
+            <input
+              aria-label="장소 검색"
+              value={placeQuery}
+              onChange={(event) => {
+                const value = event.target.value;
+                setPlaceQuery(value);
+                setPlaceSearchOpen(true);
+                if (value.trim().length < 2) {
+                  setPlaceResults([]);
+                  setPlaceSearchStatus("idle");
+                }
+              }}
+              onFocus={() => {
+                if (placeQuery.trim().length >= 2 || placeResults.length > 0) setPlaceSearchOpen(true);
+              }}
+              placeholder="원흥역 같은 장소 검색"
+            />
+            {placeQuery && (
+              <button
+                type="button"
+                className="place-search-clear"
+                onClick={() => {
+                  setPlaceQuery("");
+                  setPlaceResults([]);
+                  setPlaceSearchOpen(false);
+                  setPlaceSearchStatus("idle");
+                }}
+                aria-label="검색어 지우기"
+              >
+                ×
+              </button>
+            )}
+          </form>
+
+          {placeSearchOpen && placeQuery.trim().length >= 2 && (
+            <div className="place-search-results">
+              {placeSearchStatus === "loading" && (
+                <div className="place-search-message">찾는 중...</div>
+              )}
+              {placeSearchStatus === "error" && (
+                <div className="place-search-message">장소를 찾지 못했어요</div>
+              )}
+              {placeSearchStatus === "done" && placeResults.length === 0 && (
+                <div className="place-search-message">검색 결과가 없어요</div>
+              )}
+              {placeResults.map((place) => (
+                <button key={place.id} type="button" onClick={() => pickPlace(place)}>
+                  <span>{place.name}</span>
+                  {place.label && <small>{place.label}</small>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {showRouteFirstPanel && (
           <div className="route-first-panel">
@@ -584,20 +737,19 @@ function ExploreView({ activeCourse, activeId, courses, favoriteSet, filter,
             </button>
           </div>
         )}
-        
-        <div style={{ position: "absolute", right: 12, top: 12, zIndex: 6 }}>
-          <button className="icon-btn" aria-label="현재 위치" style={{ width: 36, height: 36 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2C2A29"
-                 strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="11" r="3"/><path d="M12 2v2M12 18v4M2 11h2M20 11h2"/>
-            </svg>
-          </button>
-        </div>
-
         {activeId && activeCourse && (
-          <div className="active-route-pill">
+          <div className={`active-route-pill ${!activeCourse.mine ? "has-save-action" : ""}`}>
             <div className="shoe-mark"><ShoeGlyph size={12}/></div>
             <strong>{activeCourse.title}</strong>
+            {!activeCourse.mine && onSaveSharedCourse && (
+              <button
+                className="active-route-save"
+                type="button"
+                onClick={() => onSaveSharedCourse(activeCourse.id)}
+              >
+                내 코스로 저장
+              </button>
+            )}
             <button onClick={() => setActiveId("")} aria-label="선택 해제">×</button>
           </div>
         )}
