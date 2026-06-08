@@ -122,6 +122,42 @@ button { cursor: pointer; }
   width: 8px;
 }
 
+.brand-mark {
+  align-items: center;
+  color: var(--text-1);
+  display: inline-flex;
+  gap: 8px;
+  height: 32px;
+  padding: 0 2px;
+}
+
+.brand-mark strong {
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.brand-logo,
+.empty-logo,
+.profile-logo {
+  background: url("/dduim-favicon-shoe.svg") center / contain no-repeat;
+  display: block;
+  flex-shrink: 0;
+}
+
+.brand-logo {
+  height: 26px;
+  width: 26px;
+}
+
+.empty-logo,
+.profile-logo {
+  height: 42px;
+  width: 42px;
+}
+
 .search-pill {
   align-items: center;
   background: var(--bg-card);
@@ -1006,8 +1042,6 @@ button { cursor: pointer; }
   overflow-y: auto;
   padding: 16px 18px 100px;
 }
-
-.tag-picker { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .publish-bar {
   background: var(--bg-card);

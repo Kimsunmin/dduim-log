@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Course, CourseVisibility, LatLngLiteral } from "@/lib/dduim/types";
-import { PACE_PRESETS, TAG_CATALOG } from "@/lib/dduim/data";
+import { PACE_PRESETS } from "@/lib/dduim/data";
 import {
   calcGeoDistance,
   createCourseId,
@@ -47,7 +47,6 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   const [paceId, setPaceId] = useState<"walk" | "jog" | "run" | "fast">("jog");
   const [stage, setStage] = useState<"draw" | "details">("draw");
   const [title, setTitle] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [visibility, setVisibility] = useState<CourseVisibility>("private");
   const [smoothness, setSmoothness] = useState(0.42);
   const [returnEnabled, setReturnEnabled] = useState(false);
@@ -384,9 +383,6 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
   };
 
   const handleSave = () => {
-    const tagObjs = selectedTags
-      .map(t => TAG_CATALOG.find(c => c.text === t))
-      .filter((t): t is (typeof TAG_CATALOG)[number] => Boolean(t));
     onSave({
       id: createCourseId(title, normalizedPath, km),
       title: title.trim() || "이름 없는 코스",
@@ -394,14 +390,14 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
       distance: +km.toFixed(1),
       minutes: minsRounded,
       elevation: Math.round(km * 3),
-      color: tagObjs[0]?.color || "mint",
+      color: "mint",
       author: "나",
       saves: 0,
       anchor: normalizedPath[0] ?? { x: 0.5, y: 0.5 },
       path: normalizedPath,
       geoPath: routePath,
       startPoint: routePath[0],
-      tags: tagObjs.length ? tagObjs : [{ text: "내코스", emoji: "✦", color: "mint" }],
+      tags: [],
       mine: true,
       visibility,
     });
@@ -636,34 +632,6 @@ export function DrawingMode({ onExit, onSave, initialCenter }: {
                   fontSize: 15, fontWeight: 600, color: "var(--text-1)",
                   fontFamily: "inherit", outline: "none", boxShadow: "var(--shadow-soft)",
                 }}/>
-            </div>
-
-            <div style={{ marginTop: 18 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-2)", display: "block", marginBottom: 8 }}>
-                태그 <span style={{ color: "var(--text-4)", fontWeight: 500 }}>· 최대 4개 ({selectedTags.length}/4)</span>
-              </label>
-              <div className="tag-picker">
-                {TAG_CATALOG.map(t => {
-                  const on = selectedTags.includes(t.text);
-                  return (
-                    <button key={t.text} onClick={() =>
-                      setSelectedTags(prev =>
-                        prev.includes(t.text) ? prev.filter(x => x !== t.text)
-                          : prev.length < 4 ? [...prev, t.text] : prev
-                      )} style={{
-                      display: "inline-flex", alignItems: "center", gap: 4,
-                      height: 32, padding: "0 12px", borderRadius: 999, cursor: "pointer",
-                      background: on ? `var(--${t.color}-soft)` : "var(--bg-card)",
-                      border: on ? "1.5px solid var(--mint-deep)" : "1px solid var(--border-warm)",
-                      color: "var(--text-1)", fontWeight: 700, fontSize: 12.5,
-                      fontFamily: "inherit", transition: "all 0.15s ease",
-                    }}>
-                      <span>#{t.text}</span>
-                      <span style={{ fontSize: 11 }}>{t.emoji}</span>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
             <div style={{ marginTop: 18 }}>

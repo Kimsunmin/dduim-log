@@ -15,14 +15,6 @@ export function CourseCard({ course, isActive, isSaved, onClick, onToggleSave, o
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 5 }}>
-              {course.tags.slice(0, 2).map(tag => (
-                <span key={tag.text} className={`chip-tag ${tag.color}`}>
-                  <span>#{tag.text}</span>
-                  <span style={{ fontSize: 10 }}>{tag.emoji}</span>
-                </span>
-              ))}
-            </div>
             <h3 style={{ margin: 0, color: "var(--text-1)", fontSize: 15.5, fontWeight: 700,
                          letterSpacing: "-0.015em", lineHeight: 1.3, overflow: "hidden",
                          textOverflow: "ellipsis", display: "-webkit-box",
